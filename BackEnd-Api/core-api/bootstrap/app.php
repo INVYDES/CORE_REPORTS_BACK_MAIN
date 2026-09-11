@@ -12,6 +12,7 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->trustProxies(at: '*');
         $middleware->alias([
             'dependencia' => \App\Http\Middleware\ResolveDependencia::class,
             'licencia' => \App\Http\Middleware\CheckLicencia::class,
