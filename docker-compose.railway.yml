@@ -1,0 +1,38 @@
+# Uso: docker compose -f docker-compose.yml -f docker-compose.railway.yml up --build
+# Conecta backend directamente a MySQL de Railway (BD "railway") en lugar del contenedor db local
+# Requiere: Railway Public Host (TCP Proxy) -> Railway > MySQL > Settings > Networking > Public Networking
+
+x-railway-env: &railway-env
+  APP_ENV: production
+  APP_DEBUG: "false"
+  APP_URL: http://localhost:8000
+  FRONTEND_URL: http://localhost:5173
+  DB_CONNECTION: mysql
+  # >>> REEMPLAZA ESTE HOST CON EL TCP PROXY PUBLICO DE RAILWAY <<<
+  # Ejemplo: centerbeam.proxy.rlwy.net  (NO uses mysql.railway.internal, es privado)
+  DB_HOST: ${RAILWAY_HOST:-shuttle.proxy.rlwy.net}
+  DB_PORT: ${RAILWAY_PORT:-15907}
+  DB_DATABASE: ${MYSQL_DATABASE:-railway}
+  DB_USERNAME: ${MYSQLUSER:-root}
+  DB_PASSWORD: ${MYSQL_ROOT_PASSWORD:-yesxYzqeRzWNOCmRvOabInFYpdPxxtVw}
+  QUEUE_CONNECTION: database
+  CACHE_STORE: database
+  SESSION_DRIVER: database
+  MAIL_MAILER: log
+  CORS_ALLOWED_ORIGINS: http://localhost:5173,http://localhost:80,http://localhost:8000
+  RUN_SEED: "false"  # pon "true" solo la primera vez para seed inicial
+
+services:
+  backend:
+    environment: *railway-env
+    depends_on: []  # sin db local
+    # entrypoint ya hace migrate --force con reintentos
+    # Si quieres forzar seed en primera carga: RUN_SEED=true docker compose -f ... up
+
+  worker:
+    environment: *railway-env
+    depends_on: []
+
+  # db local deshabilitado cuando usas este override
+  db:
+    profiles: ["donotstart"]

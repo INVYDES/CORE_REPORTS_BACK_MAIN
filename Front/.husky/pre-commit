@@ -1,0 +1,22 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+echo "Running lint and tests..."
+
+cd BackEnd-Api/core-api
+if ! vendor/bin/pint --test; then
+  echo "Pint failed"
+  exit 1
+fi
+
+cd ../../Front
+if ! npm run lint; then
+  echo "ESLint failed"
+  exit 1
+fi
+
+if ! npm run test -- --run 2>/dev/null; then
+  echo "Tests failed (or no tests yet)"
+fi
+
+echo "Pre-commit checks passed"

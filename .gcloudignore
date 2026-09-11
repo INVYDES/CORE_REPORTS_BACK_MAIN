@@ -1,0 +1,17 @@
+# .gcloudignore - exclude from Cloud Build context
+.git
+.gitignore
+node_modules/
+vendor/
+Front/node_modules/
+Front/dist/
+BackEnd-Api/core-api/vendor/
+BackEnd-Api/core-api/storage/logs/*
+BackEnd-Api/core-api/storage/framework/cache/*
+BackEnd-Api/core-api/storage/framework/views/*
+BackEnd-Api/core-api/bootstrap/cache/*
+BackEnd-Api/core-api/.phpunit.result.cache
+BD/
+*.mwb
+*.mwb.bak
+respaldo*.sql

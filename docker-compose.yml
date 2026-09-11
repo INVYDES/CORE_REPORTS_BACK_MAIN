@@ -1,0 +1,99 @@
+x-backend-env: &backend-env
+  APP_ENV: local
+  APP_DEBUG: "true"
+  APP_URL: http://localhost:8000
+  DB_CONNECTION: mysql
+  DB_HOST: db
+  DB_PORT: 3306
+  DB_DATABASE: corereports
+  DB_USERNAME: root
+  DB_PASSWORD: 747375
+  QUEUE_CONNECTION: database
+  CACHE_STORE: database
+  SESSION_DRIVER: database
+  MAIL_MAILER: log
+
+services:
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: 747375
+      MYSQL_DATABASE: corereports
+      MYSQL_USER: corereports
+      MYSQL_PASSWORD: corereports
+    ports:
+      - "3307:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./BD/Tablas.sql:/docker-entrypoint-initdb.d/01-tablas.sql:ro
+      - ./BD/04_Encuestas_y_Facturacion.sql:/docker-entrypoint-initdb.d/02-encuestas.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p747375"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./BackEnd-Api/core-api
+      dockerfile: Dockerfile
+    environment: *backend-env
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./BackEnd-Api/core-api:/var/www/html
+      - backend_storage:/var/www/html/storage
+    # entrypoint.sh ya hace migrate + serve con PORT env
+    # Para seed inicial local: RUN_SEED=true
+
+  # Procesa la cola (notificaciones, jobs) y ejecuta el scheduler
+  # (MarcarServiciosVencidos, CheckLicenciasVencidas) vía routes/console.php
+  worker:
+    build:
+      context: ./BackEnd-Api/core-api
+      dockerfile: Dockerfile
+    environment: *backend-env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./BackEnd-Api/core-api:/var/www/html
+      - backend_storage:/var/www/html/storage
+    entrypoint: ["sh", "-c", "php artisan queue:work --sleep=2 --tries=3 --timeout=0 & php artisan schedule:work & wait"]
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./Front
+      dockerfile: Dockerfile
+      target: dev
+    environment:
+      VITE_API_URL: http://localhost:8000/api
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+    volumes:
+      - ./Front:/app
+      - /app/node_modules
+    command: npm run dev -- --host 0.0.0.0
+
+  # Production frontend with nginx (use --profile prod)
+  frontend-prod:
+    build:
+      context: ./Front
+      dockerfile: Dockerfile
+      target: production
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    profiles:
+      - prod
+
+volumes:
+  db_data:
+  backend_storage:

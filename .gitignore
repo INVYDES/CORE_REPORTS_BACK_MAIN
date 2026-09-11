@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+vendor/
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Build
+Front/dist/
+BackEnd-Api/core-api/public/build
+BackEnd-Api/core-api/public/hot
+
+# Storage & cache
+BackEnd-Api/core-api/storage/logs/*
+BackEnd-Api/core-api/storage/framework/cache/*
+BackEnd-Api/core-api/storage/framework/sessions/*
+BackEnd-Api/core-api/storage/framework/views/*
+BackEnd-Api/core-api/bootstrap/cache/*
+BackEnd-Api/core-api/.phpunit.result.cache
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Duplicates / backups
+Front/core-reports-master/
+**/*.bak
+**/HistoryView.vue.bak

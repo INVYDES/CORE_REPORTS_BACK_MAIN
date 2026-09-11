@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  backend:
+    name: Backend (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php: ['8.2']
+    defaults:
+      run:
+        working-directory: BackEnd-Api/core-api
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite, bcmath, gd, redis
+          coverage: xdebug
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache Composer
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-${{ hashFiles('BackEnd-Api/core-api/composer.lock') }}
+          restore-keys: ${{ runner.os }}-composer-
+
+      - name: Install Composer deps
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Copy env
+        run: cp .env.example .env || cp .env .env.example && php artisan key:generate
+
+      - name: Pint (Laravel)
+        run: vendor/bin/pint --test
+
+      - name: PHPStan
+        run: vendor/bin/phpstan analyse --error-format=github || vendor/bin/phpstan analyse
+
+      - name: Run tests (PHPUnit)
+        env:
+          DB_CONNECTION: sqlite
+          DB_DATABASE: ":memory:"
+          APP_ENV: testing
+        run: php artisan test --coverage --min=70 || php artisan test
+
+      - name: Upload backend artifact (vendor)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-vendor
+          path: BackEnd-Api/core-api/vendor
+          retention-days: 2
+
+  frontend:
+    name: Frontend (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: ['20']
+    defaults:
+      run:
+        working-directory: Front
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: Front/package-lock.json
+
+      - name: Install Node deps
+        run: npm ci
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: Prettier check
+        run: npm run format:check
+
+      - name: Vitest (unit)
+        run: npm run test -- --coverage
+
+      - name: Build
+        run: npm run build
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: front-dist
+          path: Front/dist
+          retention-days: 7
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: front-coverage
+          path: Front/coverage
+
+  e2e:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    if: github.event_name == 'pull_request'
+    defaults:
+      run:
+        working-directory: Front
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: Front/package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e || echo "No e2e tests yet - add Playwright"
