@@ -1,0 +1,60 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/csrecords/csrecords:$COMMIT_SHA'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/csrecords/csrecords:latest'
+      - '-f'
+      - 'BackEnd-Api/core-api/Dockerfile'
+      - 'BackEnd-Api/core-api'
+    id: build-backend
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-central1-docker.pkg.dev/$PROJECT_ID/csrecords/csrecords:$COMMIT_SHA']
+    id: push-backend
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-central1-docker.pkg.dev/$PROJECT_ID/csrecords/csrecords:latest']
+    id: push-backend-latest
+    waitFor: ['push-backend']
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'csrecords'
+      - '--image=us-central1-docker.pkg.dev/$PROJECT_ID/csrecords/csrecords:$COMMIT_SHA'
+      - '--region=us-central1'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--port=8080'
+      - '--memory=1Gi'
+      - '--cpu=1'
+      - '--min-instances=0'
+      - '--max-instances=3'
+      - '--set-env-vars=APP_ENV=production,APP_DEBUG=false,LOG_CHANNEL=stack,LOG_LEVEL=warning,DB_CONNECTION=mysql,DB_HOST=$_DB_HOST,DB_PORT=$_DB_PORT,DB_DATABASE=$_DB_DATABASE,DB_USERNAME=$_DB_USERNAME,DB_PASSWORD=$_DB_PASSWORD,QUEUE_CONNECTION=database,CACHE_STORE=database,SESSION_DRIVER=database,FRONTEND_URL=$_FRONTEND_URL,CORS_ALLOWED_ORIGINS=$_CORS_ALLOWED_ORIGINS'
+      - '--set-env-vars=APP_KEY=$_APP_KEY,APP_URL=$_APP_URL'
+      - '--timeout=300'
+    id: deploy-backend
+    waitFor: ['push-backend-latest']
+
+images:
+  - 'us-central1-docker.pkg.dev/$PROJECT_ID/csrecords/csrecords:$COMMIT_SHA'
+
+timeout: 1200s
+substitutions:
+  _DB_HOST: 'shuttle.proxy.rlwy.net'
+  _DB_PORT: '15907'
+  _DB_DATABASE: 'railway'
+  _DB_USERNAME: 'root'
+  _DB_PASSWORD: 'yesxYzqeRzWNOCmRvOabInFYpdPxxtVw'
+  _APP_KEY: 'base64:KCvNRVjATwlfjUkj9M/n6bbmhQyRkm9cqqlrfjBEOaw='
+  _APP_URL: 'https://csrecords-1095995886918.us-central1.run.app'
+  _FRONTEND_URL: 'https://csrecords-front-1095995886918.us-central1.run.app'
+  _CORS_ALLOWED_ORIGINS: 'https://csrecords-front-1095995886918.us-central1.run.app,https://TU_CLOUDFLARE_PAGES_URL,http://localhost:5173'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
