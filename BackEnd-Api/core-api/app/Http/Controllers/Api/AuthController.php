@@ -6,12 +6,14 @@ use App\Http\Controllers\Controller;
 use App\Models\Usuario;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
     public function login(Request $request)
     {
+        Log::info('Login attempt', ['ip'=>$request->ip(), 'headers'=>$request->headers->all(), 'content'=>$request->getContent(), 'all'=>$request->all()]);
         $request->validate(
             ['email'=>'required|email','password'=>'required'],
             ['email.required'=>'El correo es obligatorio','email.email'=>'El correo no es válido','password.required'=>'La contraseña es obligatoria']
