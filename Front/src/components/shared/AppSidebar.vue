@@ -6,6 +6,8 @@
     
     const authStore = useAuthStore()
     const { currentUser } = storeToRefs(authStore)
+    import { useRouter } from 'vue-router'
+    const router = useRouter()
     import {
         LayoutDashboard,
         Ticket,
@@ -130,6 +132,12 @@
         if (!currentUser.value) return []
         return items.filter(item => item.roles.includes(currentUser.value!.rol))
     })
+
+    const handleLogout = async () => {
+        await authStore.logout()
+        emit('close')
+        router.push({ name: 'login', query: { redirect: route.fullPath } })
+    }
 </script>
 
 <!------------------------------------------------------------------------------------------------------------------>
@@ -183,7 +191,7 @@
                 </div>
             </div>
 
-            <button class = "logout-btn">
+            <button class = "logout-btn" @click="handleLogout">
                 <LogOut :size = "18" />
                 <span>Cerrar sesión</span>
             </button>

@@ -11,9 +11,15 @@ class Encuesta extends Model
     use BelongsToDependencia;
 
     protected $table = 'encuestas';
-    public $timestamps = false;
-    protected $fillable = ['dependencia_id','reporte_id','calificacion','comentario','respondido_por','created_at'];
-    protected $casts = ['calificacion'=>'integer','created_at'=>'datetime'];
 
-    public function reporte(): BelongsTo { return $this->belongsTo(Reporte::class, 'reporte_id'); }
+    public $timestamps = false;
+
+    protected $fillable = ['dependencia_id', 'reporte_id', 'calificacion', 'comentario', 'respondido_por', 'created_at'];
+
+    protected $casts = ['calificacion' => 'integer', 'created_at' => 'datetime'];
+
+    public function reporte(): BelongsTo
+    {
+        return $this->belongsTo(Reporte::class, 'reporte_id');
+    }
 }

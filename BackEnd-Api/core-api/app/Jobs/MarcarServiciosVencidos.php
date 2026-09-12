@@ -16,10 +16,10 @@ class MarcarServiciosVencidos implements ShouldQueue
     public function handle(): void
     {
         Servicio::withoutGlobalScope(\App\Scopes\DependenciaScope::class)
-            ->whereIn('estatus',['programado','en_proceso'])
-            ->whereDate('fecha_vencimiento','<', now()->toDateString())
-            ->each(function(Servicio $s){
-                $s->update(['estatus'=>'vencido']);
+            ->whereIn('estatus', ['programado', 'en_proceso'])
+            ->whereDate('fecha_vencimiento', '<', now()->toDateString())
+            ->each(function (Servicio $s) {
+                $s->update(['estatus' => 'vencido']);
             });
     }
 }

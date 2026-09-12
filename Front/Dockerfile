@@ -4,7 +4,9 @@ COPY package.json package-lock.json ./
 RUN npm ci --legacy-peer-deps
 COPY . .
 ARG VITE_API_URL=https://csrecords-1095995886918.us-central1.run.app/api/v1
+ARG VITE_BASE=/
 ENV VITE_API_URL=$VITE_API_URL
+ENV VITE_BASE=$VITE_BASE
 RUN npm run build
 
 FROM nginx:alpine AS production

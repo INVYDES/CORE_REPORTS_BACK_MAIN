@@ -10,10 +10,10 @@ class InventarioService
 {
     public function registrarSalida(int $dependenciaId, int $materialId, float $cantidad, string $referenciaTipo, ?int $referenciaId, ?int $usuarioId, ?string $notas = null): MovimientoInventario
     {
-        return DB::transaction(function () use ($dependenciaId,$materialId,$cantidad,$referenciaTipo,$referenciaId,$usuarioId,$notas) {
-            $mat = MaterialCatalogo::where('dependencia_id',$dependenciaId)->findOrFail($materialId);
+        return DB::transaction(function () use ($dependenciaId, $materialId, $cantidad, $referenciaTipo, $referenciaId, $usuarioId, $notas) {
+            $mat = MaterialCatalogo::where('dependencia_id', $dependenciaId)->findOrFail($materialId);
 
-            if ((float)$mat->stock_actual < $cantidad) {
+            if ((float) $mat->stock_actual < $cantidad) {
                 throw new \RuntimeException("Stock insuficiente para material {$mat->nombre}: disponible {$mat->stock_actual}, solicitado {$cantidad}");
             }
 
@@ -35,8 +35,8 @@ class InventarioService
 
     public function registrarEntrada(int $dependenciaId, int $materialId, float $cantidad, ?int $usuarioId, ?string $notas = null): MovimientoInventario
     {
-        return DB::transaction(function () use ($dependenciaId,$materialId,$cantidad,$usuarioId,$notas) {
-            $mat = MaterialCatalogo::where('dependencia_id',$dependenciaId)->findOrFail($materialId);
+        return DB::transaction(function () use ($dependenciaId, $materialId, $cantidad, $usuarioId, $notas) {
+            $mat = MaterialCatalogo::where('dependencia_id', $dependenciaId)->findOrFail($materialId);
             $mat->increment('stock_actual', $cantidad);
 
             return MovimientoInventario::create([

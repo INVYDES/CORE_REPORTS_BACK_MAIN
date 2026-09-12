@@ -1,0 +1,16 @@
+name = "csreports"
+main = "worker.js"
+account_id = "d710289688d71dc4b5c6c57e2ed3d91e"
+workers_dev = true
+compatibility_date = "2026-09-11"
+
+[assets]
+directory = "./dist"
+not_found_handling = "single-page-application"
+
+[build]
+command = "npx cross-env VITE_BASE=/ VITE_API_URL=https://csrecords-1095995886918.us-central1.run.app/api/v1 npm run build"
+
+[vars]
+VITE_API_URL = "https://csrecords-1095995886918.us-central1.run.app/api/v1"
+

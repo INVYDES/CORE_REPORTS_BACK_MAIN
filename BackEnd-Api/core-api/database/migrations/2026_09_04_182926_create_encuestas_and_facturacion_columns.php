@@ -8,7 +8,7 @@ return new class extends Migration
 {
     public function up(): void
     {
-        if (!Schema::hasTable('encuestas')) {
+        if (! Schema::hasTable('encuestas')) {
             Schema::create('encuestas', function (Blueprint $table) {
                 $table->id();
                 $table->foreignId('dependencia_id')->constrained('dependencias')->cascadeOnDelete();
@@ -19,7 +19,10 @@ return new class extends Migration
                 $table->timestamp('created_at')->nullable()->useCurrent();
             });
             // CHECK 1-5 (MySQL 8)
-            try { \Illuminate\Support\Facades\DB::statement('ALTER TABLE encuestas ADD CONSTRAINT chk_calificacion CHECK (calificacion BETWEEN 1 AND 5)'); } catch (\Throwable $e) {}
+            try {
+                \Illuminate\Support\Facades\DB::statement('ALTER TABLE encuestas ADD CONSTRAINT chk_calificacion CHECK (calificacion BETWEEN 1 AND 5)');
+            } catch (\Throwable $e) {
+            }
         }
 
         $cols = [
@@ -35,10 +38,12 @@ return new class extends Migration
             'forma_pago' => ['string', 10, 'Clave SAT, ej. 03, 04'],
         ];
         foreach ($cols as $col => [$type, $len, $comment]) {
-            if (!Schema::hasColumn('dependencias', $col)) {
+            if (! Schema::hasColumn('dependencias', $col)) {
                 Schema::table('dependencias', function (Blueprint $table) use ($col, $len, $comment) {
                     $c = $table->string($col, $len)->nullable();
-                    if ($comment) $c->comment($comment);
+                    if ($comment) {
+                        $c->comment($comment);
+                    }
                 });
             }
         }

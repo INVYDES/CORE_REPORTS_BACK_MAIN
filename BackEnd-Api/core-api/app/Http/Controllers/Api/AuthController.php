@@ -3,50 +3,155 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\LoginRequest;
+use App\Models\Dependencia;
 use App\Models\Usuario;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Validation\ValidationException;
+
+
+use Illuminate\Support\Str;
+
 
 class AuthController extends Controller
 {
-    public function login(Request $request)
+    public function login(LoginRequest $request): JsonResponse
     {
-        Log::info('Login attempt', ['ip'=>$request->ip(), 'headers'=>$request->headers->all(), 'content'=>$request->getContent(), 'all'=>$request->all()]);
-        $request->validate(
-            ['email'=>'required|email','password'=>'required'],
-            ['email.required'=>'El correo es obligatorio','email.email'=>'El correo no es válido','password.required'=>'La contraseña es obligatoria']
-        );
-        $user = Usuario::where('email',$request->email)->first();
-        if (!$user || !Hash::check($request->password, $user->password)) {
-            throw ValidationException::withMessages(['email'=>['Credenciales incorrectas. Verifica tu correo y contraseña.']]);
+        $credentials = $request->validated();
+
+        $user = Usuario::where('email', $credentials['email'])->first();
+
+        // Mensaje genérico: no revelar si el correo existe (enumeración de usuarios)
+        if (! $user || ! Hash::check($credentials['password'], $user->password)) {
+            return response()->json([
+                'message' => 'Credenciales incorrectas. Verifica tu correo y contraseña.',
+                'errors' => [
+                    'email' => ['Credenciales incorrectas. Verifica tu correo y contraseña.'],
+                ],
+            ], 401);
         }
-        if (!$user->estado) return response()->json(['message'=>'Usuario desactivado. Contacta al administrador.'],403);
-        $user->update(['ultimo_acceso'=>now()]);
-        $token = $user->createToken('api')->plainTextToken;
-        return response()->json(['user'=>$user->load('dependencia'),'token'=>$token]);
+
+        // Generar y registrar un identificador único de dispositivo
+        $deviceId = (string) Str::uuid();
+        $user->current_device = $deviceId;
+        $user->save();
+
+        if (! $user->estado) {
+            // 403 genérico sin revelar más detalles de la cuenta
+            return response()->json(['message' => 'Cuenta desactivada. Contacta al administrador.'], 403);
+        }
+
+        $user->forceFill(['ultimo_acceso' => now()])->save();
+
+        // Revocar tokens anteriores: una sesión activa por usuario
+        $user->tokens()->delete();
+
+        $token = $user->createToken($user->current_device)->plainTextToken;
+
+        return response()->json([
+            'user' => $user->load('dependencia'),
+            'token' => $token,
+        ]);
     }
 
-    public function register(Request $request)
+    /**
+     * Registro de compañía (público). Crea dependencia + usuario admin comercial.
+     * El rol del primer usuario SIEMPRE es admin comercial (rol=2): nunca se acepta del cliente.
+     */
+    public function registerCompania(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'nombre'=>'required|string|max:100','apellidos'=>'required|string|max:100',
-            'email'=>'required|email|unique:usuarios,email','password'=>'required|min:6',
-            'dependencia_id'=>'required|exists:dependencias,id','rol'=>'required|integer|in:0,1,2,3',
-            'numero_empleado'=>'nullable|string'
+            'companyName' => 'required|string|max:150',
+            'rfc' => 'nullable|string|max:20',
+            'fiscalRegime' => 'nullable|string|max:50',
+            'cfdiUse' => 'nullable|string|max:50',
+            'email' => 'required|email|unique:usuarios,email',
+            'password' => ['required', Password::min(8)],
+            'firstName' => 'required|string|max:100',
+            'lastNamePaternal' => 'required|string|max:100',
+            'lastNameMaternal' => 'nullable|string|max:100',
+            'phone' => 'nullable|string|max:30',
+            'planType' => 'nullable|in:free,trial,monthly,annual,mensual,anual',
+        ], [], [
+            'companyName' => 'nombre de empresa',
+            'email' => 'correo',
+            'password' => 'contraseña',
         ]);
-        $dependencia = \App\Models\Dependencia::findOrFail($data['dependencia_id']);
-        $count = Usuario::where('dependencia_id',$dependencia->id)->count();
-        if ($count >= $dependencia->limite_usuarios) {
-            return response()->json(['message'=>'Límite de usuarios alcanzado para esta dependencia'],422);
-        }
-        $data['password'] = Hash::make($data['password']);
-        $user = Usuario::create($data);
-        $token = $user->createToken('api')->plainTextToken;
-        return response()->json(['user'=>$user,'token'=>$token],201);
+
+        $dependencia = \DB::transaction(function () use ($data) {
+            $tipoMap = [
+                'free' => 'trial',
+                'trial' => 'trial',
+                'monthly' => 'mensual',
+                'mensual' => 'mensual',
+                'annual' => 'anual',
+                'anual' => 'anual',
+            ];
+            $tipo = $tipoMap[$data['planType'] ?? ''] ?? 'trial';
+
+            $dias = match ($tipo) {
+                'trial' => 7,
+                'mensual' => 30,
+                'anual' => 365,
+            };
+
+            $dep = Dependencia::create([
+                'nombre' => $data['companyName'],
+                'rfc' => $data['rfc'] ?? null,
+                'tipo_licencia' => $tipo,
+                'fecha_expiracion' => now()->addDays($dias)->toDateString(),
+                'limite_usuarios' => 10,
+                'limite_reportes_mensuales' => 100,
+                'correo_contacto' => $data['email'],
+                'telefono' => $data['phone'] ?? null,
+                'activa' => true,
+            ]);
+
+            $user = Usuario::create([
+                'dependencia_id' => $dep->id,
+                'numero_empleado' => 'ADM-001',
+                'rol' => 2, // Admin comercial: fijo, nunca del input
+                'nombre' => $data['firstName'],
+                'apellidos' => trim(($data['lastNamePaternal'] ?? '').' '.($data['lastNameMaternal'] ?? '')),
+                'email' => $data['email'],
+                'password' => $data['password'], // cast 'hashed' lo cifra
+                'estado' => true,
+            ]);
+
+                            // Generar y registrar un identificador único de dispositivo para el nuevo usuario
+                $deviceId = (string) Str::uuid();
+                $user->current_device = $deviceId;
+                $user->save();
+
+                return $dep;
+        });
+
+        $user = Usuario::where('email', $data['email'])->first();
+        $token = $user->createToken($user->current_device)->plainTextToken;
+
+        return response()->json([
+            'dependencia' => $dependencia,
+            'user' => $user->load('dependencia'),
+            'token' => $token,
+        ], 201);
     }
 
-    public function me(Request $request){ return response()->json($request->user()->load('dependencia')); }
-    public function logout(Request $request){ $request->user()->currentAccessToken()->delete(); return response()->json(['message'=>'logout']); }
+    public function me(Request $request): JsonResponse
+    {
+        return response()->json($request->user()->load('dependencia'));
+    }
+
+    public function logout(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if ($user) {
+            $user->current_device = null;
+            $user->save();
+        }
+        $request->user()->currentAccessToken()->delete();
+
+
+        return response()->json(['message' => 'logout']);
+    }
 }

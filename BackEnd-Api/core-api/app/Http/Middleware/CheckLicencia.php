@@ -15,7 +15,7 @@ class CheckLicencia
         if ($user && $user->dependencia) {
             $dep = $user->dependencia;
 
-            if (!$dep->activa) {
+            if (! $dep->activa) {
                 return response()->json(['message' => 'Dependencia desactivada. Licencia no activa.'], 403);
             }
 

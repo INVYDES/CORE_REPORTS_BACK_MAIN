@@ -15,6 +15,6 @@ class CheckLicenciasVencidas implements ShouldQueue
 
     public function handle(): void
     {
-        Dependencia::where('activa',true)->whereNotNull('fecha_expiracion')->whereDate('fecha_expiracion','<', now()->toDateString())->update(['activa'=>false]);
+        Dependencia::where('activa', true)->whereNotNull('fecha_expiracion')->whereDate('fecha_expiracion', '<', now()->toDateString())->update(['activa' => false]);
     }
 }

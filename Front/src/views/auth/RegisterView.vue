@@ -27,10 +27,14 @@ const formData = reactive({
     street: '', colony: '', zipCode: '', city: '', state: '', municipality: '', phone: '',
     planType: '', paymentMethod: '', paymentForm: '', invoiceRequired: false
 })
+const showLicencias = ref(false)
+const licencias = ref<any[]>([])
+const selectedLicencia = ref<number | null>(null)
+
 const handleRegister = async () => {
     isLoading.value = true
     try {
-        await client.post('/public/register-compania', {
+        const { data } = await client.post('/public/register-compania', {
             companyName: formData.companyName,
             rfc: formData.rfc,
             fiscalRegime: formData.fiscalRegime,
@@ -43,9 +47,58 @@ const handleRegister = async () => {
             phone: formData.phone,
             planType: formData.planType,
         })
-        toast.success('Cuenta creada. Inicia sesión.')
-        router.push({ name: 'login' })
+        // Guardar token y loguear automáticamente
+        if (data.token && data.user) {
+            localStorage.setItem('token', data.token)
+            localStorage.setItem('user', JSON.stringify(data.user))
+            // @ts-ignore
+            const { useAuthStore } = await import('../../stores/authStore')
+            const auth = useAuthStore()
+            // @ts-ignore
+            auth.token = data.token
+            // @ts-ignore
+            auth.currentUser = data.user
+        }
+        // Si eligió trial o no eligió plan, ir directo al dashboard
+        if (!formData.planType || formData.planType === 'free' || formData.planType === 'trial') {
+            toast.success('Cuenta creada con plan Trial. ¡Bienvenido!')
+            router.push({ name: 'dashboard' })
+            return
+        }
+        // Para planes de pago, mostrar selector de licencias con Mercado Pago
+        toast.success('Cuenta creada. Selecciona tu licencia para continuar.')
+        // Cargar licencias disponibles
+        try {
+            const res = await client.get('/licencias/disponibles')
+            licencias.value = res.data.data || res.data || []
+        } catch {
+            // Fallback hardcode si no hay endpoint
+            licencias.value = [
+                { id: 2, nombre: 'Mensual', tipo: 'mensual', precio: 399, descripcion: 'Plan mensual' },
+                { id: 3, nombre: 'Anual', tipo: 'anual', precio: 3830.40, descripcion: 'Plan anual 20% descuento' },
+            ]
+        }
+        showLicencias.value = true
     } catch(e:any){ toast.error(e?.response?.data?.message || JSON.stringify(e?.response?.data?.errors) || 'Error al registrar') } finally { isLoading.value=false }
+}
+
+const pagarConMercadoPago = async () => {
+    if (!selectedLicencia.value) {
+        toast.error('Selecciona una licencia')
+        return
+    }
+    isLoading.value = true
+    try {
+        const res = await client.post(`/licencias/${selectedLicencia.value}/comprar-mercadopago`)
+        const initPoint = res.data.init_point || res.data.initPoint
+        if (initPoint) {
+            toast.success('Redirigiendo a Mercado Pago...')
+            window.location.href = initPoint
+        } else {
+            toast.success('Licencia activada')
+            router.push({ name: 'dashboard' })
+        }
+    } catch(e:any){ toast.error(e?.response?.data?.message || 'Error al crear preferencia de pago') } finally { isLoading.value=false }
 }
 </script>
 
@@ -338,8 +391,32 @@ const handleRegister = async () => {
 
                     </div>
 
+                    <!-- SECCIÓN 5 - SELECCIÓN DE LICENCIA (aparece después de registro) -->
+                    <div v-if="showLicencias" class="form-section" style="border:2px solid #3b82f6; background:#eff6ff; border-radius:8px; padding:1.5rem;">
+                        <h3><span class="step-num" style="background:#10b981">5</span> Selecciona tu licencia</h3>
+                        <p class="subtitle" style="margin-bottom:1rem; color:#475569">Tu cuenta ya fue creada. Elige un plan para activar tu licencia y serás redirigido a Mercado Pago.</p>
+                        <div v-for="lic in licencias" :key="lic.id" @click="selectedLicencia = lic.id"
+                             :style="{border: selectedLicencia===lic.id ? '2px solid #3b82f6' : '1px solid #cbd5e1', background: selectedLicencia===lic.id ? '#dbeafe' : 'white', borderRadius:'8px', padding:'1rem', marginBottom:'0.75rem', cursor:'pointer'}">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <div>
+                                    <strong>{{ lic.nombre }}</strong> <span style="background:#e0e7ff; padding:2px 6px; border-radius:4px; font-size:0.75rem;">{{ lic.tipo }}</span>
+                                    <div style="font-size:0.85rem; color:#475569; margin-top:0.25rem;">{{ lic.descripcion }}</div>
+                                    <div style="font-size:0.8rem; color:#64748b;">{{ lic.max_usuarios }} usuarios • {{ lic.max_reportes_mensuales }} reportes/mes</div>
+                                </div>
+                                <div style="text-align:right;">
+                                    <div style="font-weight:700; color:#1e3a8a;">${{ lic.precio }} MXN</div>
+                                    <div v-if="lic.precio_anual" style="font-size:0.75rem; color:#64748b;">Anual ${{ lic.precio_anual }}</div>
+                                </div>
+                            </div>
+                        </div>
+                        <button type="button" @click="pagarConMercadoPago" :disabled="isLoading || !selectedLicencia" class="btn-primary" style="margin-top:1rem; background:#009ee3;">
+                            {{ isLoading ? 'Creando preferencia...' : 'Pagar con Mercado Pago' }}
+                        </button>
+                        <button type="button" @click="router.push({ name: 'dashboard' })" style="width:100%; margin-top:0.5rem; background:transparent; border:1px solid #cbd5e1; padding:0.6rem; border-radius:6px; cursor:pointer; color:#475569;">Continuar con Trial gratis</button>
+                    </div>
+
                     <!-- SECCIÓN 5 - BOTÓN "ENVIAR"-->
-                    <div class="form-actions">
+                    <div v-if="!showLicencias" class="form-actions">
                         <button type="submit" :disabled="isLoading" class="btn-primary">
                             {{ isLoading ? 'Registrando...' : 'Crear cuenta' }}
                         </button>

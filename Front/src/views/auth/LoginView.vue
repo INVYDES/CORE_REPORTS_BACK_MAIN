@@ -20,17 +20,17 @@ const handleLogin = async () => {
   try {
     await auth.login(email.value, password.value)
     toast.success('Bienvenido')
-    router.push({ name: 'dashboard' })
+    // Respeta ?redirect= tras el login (session expiry, deep-links)
+    const redirect = router.currentRoute.value.query.redirect as string | undefined
+    router.push(redirect && redirect.startsWith('/') ? redirect : { name: 'dashboard' })
   } catch (e: any) {
     const status = e?.response?.status
     if (status === 419) {
       errorMsg.value = 'Sesión expirada. Recarga la página (F5) e intenta de nuevo. Si persiste, limpia cookies del sitio.'
-    } else if (status === 422) {
-      errorMsg.value = e?.response?.data?.errors?.email?.[0] || e?.response?.data?.message || 'Revisa los campos ingresados.'
+    } else if (status === 422 || status === 401) {
+      errorMsg.value = e?.response?.data?.errors?.email?.[0] || e?.response?.data?.message || 'Credenciales incorrectas. Verifica tu correo y contraseña.'
     } else if (status === 403) {
       errorMsg.value = e?.response?.data?.message || 'Usuario desactivado. Contacta al administrador.'
-    } else if (status === 401) {
-      errorMsg.value = 'Credenciales incorrectas. Verifica tu correo y contraseña.'
     } else {
       errorMsg.value = e?.response?.data?.message || 'Error de conexión. Verifica que la API esté en http://localhost:8000'
     }

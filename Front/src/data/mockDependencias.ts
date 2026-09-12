@@ -30,7 +30,7 @@ export const mockDependencias: Dependencia[] = [
         fechaRegistro: '2023-01-15',
         nivelUsuarios: 'Básico',
         limiteUsuarios: 4,
-        logo: '/core-reports/logo_empresa.png'
+        logo: '/logo_empresa.png'
     },
     {
         idDependencia: 2,

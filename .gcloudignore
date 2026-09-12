@@ -15,3 +15,5 @@ BD/
 *.mwb
 *.mwb.bak
 respaldo*.sql
+.wrangler/
+.claude/

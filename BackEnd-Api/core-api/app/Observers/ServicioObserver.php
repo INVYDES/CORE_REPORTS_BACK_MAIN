@@ -2,12 +2,12 @@
 
 namespace App\Observers;
 
+use App\Mail\NotificacionMail;
+use App\Models\Notificacion;
 use App\Models\Servicio;
 use App\Models\ServicioHistorial;
-use App\Models\Notificacion;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Mail;
-use App\Mail\NotificacionMail;
 
 class ServicioObserver
 {
@@ -27,7 +27,7 @@ class ServicioObserver
 
     public function updated(Servicio $servicio): void
     {
-        if ($servicio->wasChanged('estatus') && in_array($servicio->estatus, ['vencido','realizado'])) {
+        if ($servicio->wasChanged('estatus') && in_array($servicio->estatus, ['vencido', 'realizado'])) {
             $dep = $servicio->dependencia;
             $dest = $dep->correo_reportes ?? $dep->correo_contacto;
             $tipo = $servicio->estatus === 'vencido' ? 'servicio_vencido' : 'servicio_realizado';
@@ -45,7 +45,12 @@ class ServicioObserver
                 'created_at' => now(),
             ]);
             if ($dest) {
-                try { Mail::to($dest)->send(new NotificacionMail($notif)); $notif->update(['estatus'=>'enviado','enviado_at'=>now()]); } catch (\Throwable $e) { $notif->update(['estatus'=>'fallido']); }
+                try {
+                    Mail::to($dest)->send(new NotificacionMail($notif));
+                    $notif->update(['estatus' => 'enviado', 'enviado_at' => now()]);
+                } catch (\Throwable $e) {
+                    $notif->update(['estatus' => 'fallido']);
+                }
             }
         }
     }

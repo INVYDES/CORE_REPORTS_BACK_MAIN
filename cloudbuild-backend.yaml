@@ -53,8 +53,8 @@ substitutions:
   _DB_PASSWORD: 'yesxYzqeRzWNOCmRvOabInFYpdPxxtVw'
   _APP_KEY: 'base64:KCvNRVjATwlfjUkj9M/n6bbmhQyRkm9cqqlrfjBEOaw='
   _APP_URL: 'https://csrecords-1095995886918.us-central1.run.app'
-  _FRONTEND_URL: 'https://csrecords-front-1095995886918.us-central1.run.app'
-  _CORS_ALLOWED_ORIGINS: 'https://csrecords-front-1095995886918.us-central1.run.app,https://TU_CLOUDFLARE_PAGES_URL,http://localhost:5173'
+  _FRONTEND_URL: 'https://csreports.eorder-mexico.workers.dev'
+  _CORS_ALLOWED_ORIGINS: 'https://csreports.eorder-mexico.workers.dev,https://csrecords-front-1095995886918.us-central1.run.app,http://localhost:5173'
 
 options:
   logging: CLOUD_LOGGING_ONLY

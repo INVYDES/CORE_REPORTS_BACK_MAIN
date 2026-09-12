@@ -15,9 +15,12 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->trustProxies(at: '*');
         $middleware->alias([
             'dependencia' => \App\Http\Middleware\ResolveDependencia::class,
-            'licencia' => \App\Http\Middleware\CheckLicencia::class,
+                'licencia' => \App\Http\Middleware\CheckLicencia::class,
+                'singleDevice' => \App\Http\Middleware\EnsureSingleDevice::class,
+
         ]);
         $middleware->throttleApi('60,1');
+        $middleware->append(\App\Http\Middleware\SecurityHeaders::class);
         $middleware->append(\Illuminate\Http\Middleware\HandleCors::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

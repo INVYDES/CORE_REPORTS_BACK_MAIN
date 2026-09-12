@@ -2,12 +2,12 @@
 
 namespace App\Observers;
 
+use App\Mail\NotificacionMail;
+use App\Models\Notificacion;
 use App\Models\Ticket;
 use App\Models\TicketHistorial;
-use App\Models\Notificacion;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Mail;
-use App\Mail\NotificacionMail;
 
 class TicketObserver
 {
@@ -27,7 +27,7 @@ class TicketObserver
 
     public function updated(Ticket $ticket): void
     {
-        if ($ticket->wasChanged('estatus') && in_array($ticket->estatus, ['resuelto','cerrado'])) {
+        if ($ticket->wasChanged('estatus') && in_array($ticket->estatus, ['resuelto', 'cerrado'])) {
             $dep = $ticket->dependencia;
             $dest = $dep->correo_reportes ?? $dep->correo_contacto;
             $notif = Notificacion::create([
@@ -44,7 +44,12 @@ class TicketObserver
                 'created_at' => now(),
             ]);
             if ($dest) {
-                try { Mail::to($dest)->send(new NotificacionMail($notif)); $notif->update(['estatus'=>'enviado','enviado_at'=>now()]); } catch (\Throwable $e) { $notif->update(['estatus'=>'fallido']); }
+                try {
+                    Mail::to($dest)->send(new NotificacionMail($notif));
+                    $notif->update(['estatus' => 'enviado', 'enviado_at' => now()]);
+                } catch (\Throwable $e) {
+                    $notif->update(['estatus' => 'fallido']);
+                }
             }
         }
     }

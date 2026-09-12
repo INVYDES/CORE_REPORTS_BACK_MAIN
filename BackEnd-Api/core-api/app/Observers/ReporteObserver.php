@@ -2,13 +2,13 @@
 
 namespace App\Observers;
 
-use App\Models\Reporte;
-use App\Models\TicketHistorial;
-use App\Models\ServicioHistorial;
+use App\Mail\NotificacionMail;
 use App\Models\Notificacion;
+use App\Models\Reporte;
+use App\Models\ServicioHistorial;
+use App\Models\TicketHistorial;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Mail;
-use App\Mail\NotificacionMail;
 
 class ReporteObserver
 {
@@ -20,8 +20,11 @@ class ReporteObserver
         if ($reporte->ticket_id && $reporte->ticket) {
             $ticket = $reporte->ticket;
             $nuevo = null;
-            if ($reporte->estatus === 'finalizado') $nuevo = 'resuelto';
-            elseif ($reporte->estatus === 'parcial') $nuevo = 'en_proceso';
+            if ($reporte->estatus === 'finalizado') {
+                $nuevo = 'resuelto';
+            } elseif ($reporte->estatus === 'parcial') {
+                $nuevo = 'en_proceso';
+            }
 
             if ($nuevo && $ticket->estatus !== $nuevo) {
                 $anterior = $ticket->estatus;
@@ -43,8 +46,11 @@ class ReporteObserver
         if ($reporte->servicio_id && $reporte->servicio) {
             $servicio = $reporte->servicio;
             $nuevo = null;
-            if ($reporte->estatus === 'finalizado') $nuevo = 'realizado';
-            elseif ($reporte->estatus === 'parcial') $nuevo = 'en_proceso';
+            if ($reporte->estatus === 'finalizado') {
+                $nuevo = 'realizado';
+            } elseif ($reporte->estatus === 'parcial') {
+                $nuevo = 'en_proceso';
+            }
 
             if ($nuevo && $servicio->estatus !== $nuevo) {
                 $anterior = $servicio->estatus;
@@ -78,7 +84,12 @@ class ReporteObserver
                     'created_at' => now(),
                 ]);
                 if ($dest) {
-                    try { Mail::to($dest)->send(new NotificacionMail($notif)); $notif->update(['estatus'=>'enviado','enviado_at'=>now()]); } catch (\Throwable $e) { $notif->update(['estatus'=>'fallido']); }
+                    try {
+                        Mail::to($dest)->send(new NotificacionMail($notif));
+                        $notif->update(['estatus' => 'enviado', 'enviado_at' => now()]);
+                    } catch (\Throwable $e) {
+                        $notif->update(['estatus' => 'fallido']);
+                    }
                 }
             }
         }

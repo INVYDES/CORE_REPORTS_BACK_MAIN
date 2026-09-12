@@ -2,9 +2,9 @@
 
 namespace App\Traits;
 
+use App\Models\Dependencia;
 use App\Scopes\DependenciaScope;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use App\Models\Dependencia;
 
 trait BelongsToDependencia
 {

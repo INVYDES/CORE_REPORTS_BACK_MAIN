@@ -13,7 +13,7 @@ class HealthTest extends TestCase
 
     public function test_api_login_validation(): void
     {
-        $this->postJson('/api/login', [])->assertStatus(422)->assertJsonValidationErrors(['email','password']);
+        $this->postJson('/api/login', [])->assertStatus(422)->assertJsonValidationErrors(['email', 'password']);
     }
 
     public function test_public_register_compania_validation(): void
