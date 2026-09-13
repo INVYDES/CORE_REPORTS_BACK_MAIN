@@ -2,111 +2,80 @@
 
 namespace App\Models;
 
-use App\Traits\BelongsToDependencia;
-use App\Traits\RegistraBitacora;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Reporte extends Model
 {
-    use BelongsToDependencia, RegistraBitacora, SoftDeletes;
+    use HasFactory;
 
     protected $table = 'reportes';
+    protected $primaryKey = 'id_reporte';
 
     protected $fillable = [
-        'dependencia_id', 'area_id', 'equipo_id', 'folio', 'creado_por', 'responsable_id',
-        'ticket_id', 'servicio_id', 'tipo', 'categoria', 'fecha_inicio', 'fecha_fin',
-        'desarrollo', 'estatus', 'costo_mano_obra', 'costo_materiales',
-        'hora_salida', 'hora_llegada', 'hora_inicio_diagnostico', 'hora_inicio_trabajo', 'hora_fin_trabajo', 'hora_regreso',
-        'es_retrabajo', 'reporte_origen_id', 'conformidad_estatus', 'conformidad_firmado_por', 'conformidad_fecha', 'ftfr',
+        'folio',
+        'id_dependencia',
+        'id_subdependencia',
+        'creado_por',
+        'tipo_reporte',
+        'origen_datos_id',
+        'categoria',
+        'fecha_elaboracion',
+        'responsable_id',
+        'responsable_texto',
+        'cargo_texto',
+        'fecha_hora_inicio',
+        'fecha_hora_fin',
+        'hora_salida_base',
+        'hora_llegada_sitio',
+        'hora_regreso_a_base',
+        'falla_reportada',
+        'desarrollo_actividades',
+        'es_retrabajo',
+        'estatus_reporte',
     ];
 
     protected $casts = [
-        'fecha_inicio' => 'datetime',
-        'fecha_fin' => 'datetime',
-        'hora_salida' => 'datetime',
-        'hora_llegada' => 'datetime',
-        'hora_inicio_diagnostico' => 'datetime',
-        'hora_inicio_trabajo' => 'datetime',
-        'hora_fin_trabajo' => 'datetime',
-        'hora_regreso' => 'datetime',
-        'conformidad_fecha' => 'datetime',
         'es_retrabajo' => 'boolean',
-        'ftfr' => 'boolean',
-        'costo_mano_obra' => 'decimal:2',
-        'costo_materiales' => 'decimal:2',
     ];
 
-    public function creador(): BelongsTo
+    public function dependencia()
     {
-        return $this->belongsTo(Usuario::class, 'creado_por');
+        return $this->belongsTo(Dependencia::class, 'id_dependencia', 'id_dependencia');
     }
 
-    public function responsable(): BelongsTo
+    public function subdependencia()
     {
-        return $this->belongsTo(Usuario::class, 'responsable_id');
+        return $this->belongsTo(Subdependencia::class, 'id_subdependencia', 'id_subdependencia');
     }
 
-    public function ticket(): BelongsTo
+    public function creador()
     {
-        return $this->belongsTo(Ticket::class, 'ticket_id');
+        return $this->belongsTo(User::class, 'creado_por', 'id_usuario');
     }
 
-    public function servicio(): BelongsTo
+    public function responsable()
     {
-        return $this->belongsTo(Servicio::class, 'servicio_id');
+        return $this->belongsTo(User::class, 'responsable_id', 'id_usuario');
     }
 
-    public function area(): BelongsTo
+    public function materiales()
     {
-        return $this->belongsTo(Area::class, 'area_id');
+        return $this->hasMany(ReporteMaterial::class, 'id_reporte', 'id_reporte');
     }
 
-    public function equipo(): BelongsTo
+    public function evidencias()
     {
-        return $this->belongsTo(Equipo::class, 'equipo_id');
+        return $this->hasMany(ReporteEvidencia::class, 'id_reporte', 'id_reporte');
     }
 
-    public function origen(): BelongsTo
+    public function ejecutores()
     {
-        return $this->belongsTo(self::class, 'reporte_origen_id');
+        return $this->hasMany(ReporteEjecutor::class, 'id_reporte', 'id_reporte');
     }
 
-    public function ejecutores(): HasMany
+    public function encuesta()
     {
-        return $this->hasMany(ReporteEjecutor::class, 'reporte_id');
-    }
-
-    public function materiales(): HasMany
-    {
-        return $this->hasMany(ReporteMaterial::class, 'reporte_id');
-    }
-
-    public function evidencias(): HasMany
-    {
-        return $this->hasMany(ReporteEvidencia::class, 'reporte_id');
-    }
-
-    public function scopePorTipo($q, $tipo)
-    {
-        return $tipo ? $q->where('tipo', $tipo) : $q;
-    }
-
-    /** Folio único por dependencia: REP-YYYYMM-XXXXX (secuencial mensual). */
-    public static function generarFolio(int $dependenciaId): string
-    {
-        $prefijo = 'REP-'.now()->format('Ym');
-
-        $ultimo = static::withoutGlobalScope(\App\Scopes\DependenciaScope::class)
-            ->where('dependencia_id', $dependenciaId)
-            ->where('folio', 'like', $prefijo.'-%')
-            ->orderByDesc('folio')
-            ->value('folio');
-
-        $secuencia = $ultimo ? ((int) substr($ultimo, -5)) + 1 : 1;
-
-        return sprintf('%s-%05d', $prefijo, $secuencia);
+        return $this->hasOne(Encuesta::class, 'id_reporte', 'id_reporte');
     }
 }

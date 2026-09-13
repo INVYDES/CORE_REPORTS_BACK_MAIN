@@ -2,29 +2,29 @@
 
 namespace App\Models;
 
-use App\Traits\BelongsToDependencia;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ReporteEjecutor extends Model
 {
-    use BelongsToDependencia;
+    use HasFactory;
 
     protected $table = 'reporte_ejecutores';
+    protected $primaryKey = 'id';
+    const UPDATED_AT = null;
 
-    public $timestamps = false;
+    protected $fillable = [
+        'id_reporte',
+        'id_usuario',
+    ];
 
-    protected $fillable = ['dependencia_id', 'reporte_id', 'usuario_id', 'created_at'];
-
-    protected $casts = ['created_at' => 'datetime'];
-
-    public function reporte(): BelongsTo
+    public function reporte()
     {
-        return $this->belongsTo(Reporte::class, 'reporte_id');
+        return $this->belongsTo(Reporte::class, 'id_reporte', 'id_reporte');
     }
 
-    public function usuario(): BelongsTo
+    public function usuario()
     {
-        return $this->belongsTo(Usuario::class, 'usuario_id');
+        return $this->belongsTo(User::class, 'id_usuario', 'id_usuario');
     }
 }

@@ -2,29 +2,26 @@
 
 namespace App\Models;
 
-use App\Traits\BelongsToDependencia;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ReporteMaterial extends Model
 {
-    use BelongsToDependencia;
+    use HasFactory;
 
     protected $table = 'reporte_materiales';
+    protected $primaryKey = 'id_item';
+    const UPDATED_AT = null;
 
-    public $timestamps = false;
+    protected $fillable = [
+        'id_reporte',
+        'material',
+        'cantidad',
+        'unidad',
+    ];
 
-    protected $fillable = ['dependencia_id', 'reporte_id', 'material_id', 'cantidad', 'costo_unitario', 'created_at'];
-
-    protected $casts = ['cantidad' => 'decimal:2', 'costo_unitario' => 'decimal:2', 'created_at' => 'datetime'];
-
-    public function reporte(): BelongsTo
+    public function reporte()
     {
-        return $this->belongsTo(Reporte::class, 'reporte_id');
-    }
-
-    public function material(): BelongsTo
-    {
-        return $this->belongsTo(MaterialCatalogo::class, 'material_id');
+        return $this->belongsTo(Reporte::class, 'id_reporte', 'id_reporte');
     }
 }

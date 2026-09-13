@@ -1,102 +1,74 @@
 <?php
 
-use App\Http\Controllers\Api\AnalyticsController;
-use App\Http\Controllers\Api\AreaController;
-use App\Http\Controllers\Api\AuthController;
-use App\Http\Controllers\Api\DashboardController;
-use App\Http\Controllers\Api\DependenciaController;
-use App\Http\Controllers\Api\EncuestaController;
-use App\Http\Controllers\Api\EquipoController;
-use App\Http\Controllers\Api\HistoryController;
-use App\Http\Controllers\Api\LicenciaController;
-use App\Http\Controllers\Api\MaterialController;
-use App\Http\Controllers\Api\NotificacionController;
-use App\Http\Controllers\Api\ReporteController;
-use App\Http\Controllers\Api\ServicioController;
-use App\Http\Controllers\Api\TicketController;
-use App\Http\Controllers\Api\UsuarioController;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\AuthController;
+use App\Http\Controllers\TicketController; 
+use App\Http\Controllers\UserController;
+use App\Http\Controllers\SubdependenciaController;
+use App\Http\Controllers\ServicioController;
+use App\Http\Controllers\ReporteController;
+use App\Http\Controllers\EncuestaController;
+use App\Http\Controllers\EmpresaController;
 
-Route::prefix('v1')->group(function () {
-    // Auth: throttle estricto anti brute-force
-    Route::middleware('throttle:auth')->group(function () {
-        Route::post('/login', [AuthController::class, 'login']);
-    });
+/*
+|--------------------------------------------------------------------------
+| API Routes - Sistema Core Reports
+|--------------------------------------------------------------------------
+|
+| Prefijo automático: "/api"
+| Ejemplo: http://localhost:8000/api/login
+|
+*/
 
-    // Registro público: 3/min por IP
-    Route::middleware('throttle:registro')->group(function () {
-        Route::post('/public/register-compania', [AuthController::class, 'registerCompania']);
-    });
+// =========================================================================
+// 1. RUTAS PÚBLICAS
+// =========================================================================
+Route::post('/login', [AuthController::class, 'login']);
 
-    // Webhooks: fuera de auth, con rate limit y firma verificada en el controlador
-    Route::middleware('throttle:webhook')->group(function () {
-        Route::post('/mercadopago/licencia-webhook', [LicenciaController::class, 'webhookMercadoPago']);
-        Route::post('/licencias/webhook/mercadopago', [LicenciaController::class, 'webhookMercadoPago']);
-    });
-
-    // Catálogo de licencias: público
-    Route::get('/licencias/disponibles', [LicenciaController::class, 'disponibles']);
-
-    // API autenticada
-    Route::middleware(['auth:sanctum', 'dependencia', 'licencia', 'singleDevice'])->group(function () {
-        Route::get('/me', [AuthController::class, 'me']);
-        Route::post('/logout', [AuthController::class, 'logout']);
-
-        Route::apiResource('dependencias', DependenciaController::class)->only(['index', 'show', 'update']);
-        Route::apiResource('areas', AreaController::class);
-        Route::apiResource('equipos', EquipoController::class);
-        Route::apiResource('usuarios', UsuarioController::class);
-        Route::apiResource('tickets', TicketController::class);
-        Route::patch('tickets/{ticket}/asignar', [TicketController::class, 'asignar']);
-        Route::apiResource('servicios', ServicioController::class);
-        Route::apiResource('reportes', ReporteController::class);
-        Route::patch('reportes/{reporte}/conformidad', [ReporteController::class, 'conformidad']);
-        Route::get('reportes/{reporte}/pdf', [ReporteController::class, 'pdf']);
-        Route::apiResource('materiales', MaterialController::class)->parameters(['materiales' => 'material']);
-        Route::post('materiales/{material}/entrada', [MaterialController::class, 'entrada']);
-        Route::get('materiales/{material}/movimientos', [MaterialController::class, 'movimientos']);
-        Route::apiResource('encuestas', EncuestaController::class)->only(['index', 'store', 'show']);
-        Route::post('licencias/{licencia}/comprar-mercadopago', [LicenciaController::class, 'comprarLicenciaMercadoPago']);
-        Route::get('licencias/verificar-pago/{paymentId}', [LicenciaController::class, 'verificarPagoMercadoPago']);
-
-        Route::get('history', [HistoryController::class, 'index']);
-        Route::apiResource('notificaciones', NotificacionController::class)->only(['index', 'store']);
-        Route::patch('notificaciones/{notificacion}/leida', [NotificacionController::class, 'markRead']);
-        Route::post('notificaciones/leidas-todas', [NotificacionController::class, 'markAllRead']);
-        Route::post('notificaciones/{notificacion}/reenviar', [NotificacionController::class, 'resend']);
-
-        Route::get('dashboard/tickets-por-asignar', [DashboardController::class, 'ticketsPorAsignar']);
-        Route::get('dashboard/servicios-proximos', [DashboardController::class, 'serviciosProximos']);
-        Route::get('dashboard/actividad-reciente', [DashboardController::class, 'actividadReciente']);
-        Route::get('dashboard', [DashboardController::class, 'index']);
-
-        Route::prefix('analytics')->group(function () {
-            Route::get('sla', [AnalyticsController::class, 'sla']);
-            Route::get('mttr', [AnalyticsController::class, 'mttr']);
-            Route::get('horas-hombre', [AnalyticsController::class, 'horasHombre']);
-            Route::get('horas-por-tecnico', [AnalyticsController::class, 'horasPorTecnico']);
-            Route::get('retrabajos', [AnalyticsController::class, 'retrabajos']);
-            Route::get('categoria', [AnalyticsController::class, 'categoria']);
-            Route::get('tiempos', [AnalyticsController::class, 'tiempos']);
-            Route::get('volumen', [AnalyticsController::class, 'volumen']);
-            Route::get('eficacia', [AnalyticsController::class, 'eficacia']);
-            Route::get('proactivo-reactivo', [AnalyticsController::class, 'proactivoReactivo']);
-            Route::get('conteo', [AnalyticsController::class, 'conteo']);
-            Route::get('all', [AnalyticsController::class, 'all']);
-        });
-    });
-}); // v1
-
-// Backward compatibility: rutas sin prefijo por 1 release
-Route::middleware('throttle:auth')->group(function () {
-    Route::post('/login', [AuthController::class, 'login']);
-});
-Route::middleware('throttle:registro')->group(function () {
-    Route::post('/public/register-compania', [AuthController::class, 'registerCompania']);
-});
-Route::middleware(['auth:sanctum', 'dependencia', 'licencia', 'singleDevice'])->group(function () {
+// =========================================================================
+// 2. RUTAS PROTEGIDAS (Sanctum)
+// =========================================================================
+Route::middleware('auth:sanctum')->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
     Route::post('/logout', [AuthController::class, 'logout']);
-    Route::get('history', [HistoryController::class, 'index']);
-    Route::get('dashboard', [DashboardController::class, 'index']);
+
+    // 👇 1. MÓDULO DE TICKETS
+    Route::get('/tickets', [TicketController::class, 'index']);       // Para listar
+    Route::post('/tickets', [TicketController::class, 'store']);     // Para crear
+    Route::get('/tickets/{id}', [TicketController::class, 'show']);   // Detalle
+    Route::put('/tickets/{id}', [TicketController::class, 'update']); // Actualizar / Asignar
+    Route::get('/tecnicos', [TicketController::class, 'tecnicos']);   // Lista de técnicos
+
+    // 👇 2. MÓDULO DE USUARIOS / EQUIPO
+    Route::get('/usuarios', [UserController::class, 'index']);
+    Route::post('/usuarios', [UserController::class, 'store']);
+    Route::put('/usuarios/{id}', [UserController::class, 'update']);
+
+    // 👇 3. MÓDULO DE SUBDEPENDENCIAS / ÁREAS
+    Route::get('/subdependencias', [SubdependenciaController::class, 'index']);
+    Route::post('/subdependencias', [SubdependenciaController::class, 'store']);
+    Route::put('/subdependencias/{id}', [SubdependenciaController::class, 'update']);
+    Route::delete('/subdependencias/{id}', [SubdependenciaController::class, 'destroy']);
+
+    // 👇 4. MÓDULO DE SERVICIOS PROGRAMADOS
+    Route::get('/servicios', [ServicioController::class, 'index']);
+    Route::post('/servicios', [ServicioController::class, 'store']);
+    Route::get('/servicios/{id}', [ServicioController::class, 'show']);
+    Route::put('/servicios/{id}', [ServicioController::class, 'update']);
+
+    // 👇 5. MÓDULO DE REPORTES DE SERVICIO
+    Route::get('/reportes', [ReporteController::class, 'index']);
+    Route::post('/reportes', [ReporteController::class, 'store']);
+    Route::get('/reportes/{id}', [ReporteController::class, 'show']);
+    Route::put('/reportes/{id}', [ReporteController::class, 'update']);
+
+    // 👇 6. MÓDULO DE ENCUESTAS DE SATISFACCIÓN
+    Route::post('/encuestas', [EncuestaController::class, 'store']);
+    Route::get('/encuestas/{idReporte}', [EncuestaController::class, 'show']);
+
+    // 👇 7. MÓDULO DE EMPRESA / CONFIGURACIÓN COMERCIAL Y LOGOTIPO
+    Route::get('/empresa', [EmpresaController::class, 'show']);
+    Route::put('/empresa', [EmpresaController::class, 'update']);
+    Route::post('/empresa/logo', [EmpresaController::class, 'uploadLogo']);
 });
+

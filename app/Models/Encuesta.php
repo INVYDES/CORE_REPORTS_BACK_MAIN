@@ -2,24 +2,27 @@
 
 namespace App\Models;
 
-use App\Traits\BelongsToDependencia;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Encuesta extends Model
 {
-    use BelongsToDependencia;
+    use HasFactory;
 
     protected $table = 'encuestas';
+    protected $primaryKey = 'id_encuesta';
+    const UPDATED_AT = null;
 
-    public $timestamps = false;
+    protected $fillable = [
+        'id_reporte',
+        'calificacion',
+        'comentarios',
+        'nombre_firma',
+        'fecha',
+    ];
 
-    protected $fillable = ['dependencia_id', 'reporte_id', 'calificacion', 'comentario', 'respondido_por', 'created_at'];
-
-    protected $casts = ['calificacion' => 'integer', 'created_at' => 'datetime'];
-
-    public function reporte(): BelongsTo
+    public function reporte()
     {
-        return $this->belongsTo(Reporte::class, 'reporte_id');
+        return $this->belongsTo(Reporte::class, 'id_reporte', 'id_reporte');
     }
 }

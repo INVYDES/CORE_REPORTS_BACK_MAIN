@@ -2,56 +2,44 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Dependencia extends Model
 {
-    use SoftDeletes;
+    use HasFactory;
 
     protected $table = 'dependencias';
+    protected $primaryKey = 'id_dependencia';
 
     protected $fillable = [
-        'nombre', 'rfc', 'tipo_licencia', 'fecha_expiracion',
-        'limite_usuarios', 'limite_reportes_mensuales',
-        'correo_contacto', 'correo_reportes', 'telefono', 'datos_facturacion', 'activa',
+        'nombre',
+        'rfc',
+        'tipo_licencia',
+        'fecha_expiracion_licencia',
+        'correo_contacto',
+        'correo_reportes',
+        'telefono',
+        'datos_facturacion',
+        'activo',
+        'fecha_registro',
+        'nivel_usuarios',
+        'limite_usuarios',
+        'logo',
     ];
 
     protected $casts = [
-        'fecha_expiracion' => 'date',
-        'activa' => 'boolean',
-        'limite_usuarios' => 'integer',
-        'limite_reportes_mensuales' => 'integer',
+        'activo'                    => 'boolean',
+        'limite_usuarios'           => 'integer',
+        'fecha_registro'            => 'date',
+        'fecha_expiracion_licencia' => 'date',
     ];
 
-    public function usuarios(): HasMany
+    /**
+     * Relación: Una empresa tiene muchos empleados/usuarios.
+     */
+    public function usuarios()
     {
-        return $this->hasMany(Usuario::class, 'dependencia_id');
-    }
-
-    public function areas(): HasMany
-    {
-        return $this->hasMany(Area::class, 'dependencia_id');
-    }
-
-    public function equipos(): HasMany
-    {
-        return $this->hasMany(Equipo::class, 'dependencia_id');
-    }
-
-    public function tickets(): HasMany
-    {
-        return $this->hasMany(Ticket::class, 'dependencia_id');
-    }
-
-    public function servicios(): HasMany
-    {
-        return $this->hasMany(Servicio::class, 'dependencia_id');
-    }
-
-    public function reportes(): HasMany
-    {
-        return $this->hasMany(Reporte::class, 'dependencia_id');
+        return $this->hasMany(User::class, 'id_dependencia', 'id_dependencia');
     }
 }

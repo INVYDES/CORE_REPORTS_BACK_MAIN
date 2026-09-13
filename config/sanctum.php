@@ -50,8 +50,7 @@ return [
     |
     */
 
-    // Tokens API expiran en 24h (uso de la app tipo turno laboral)
-    'expiration' => (int) env('SANCTUM_EXPIRATION', 60 * 24),
+    'expiration' => null,
 
     /*
     |--------------------------------------------------------------------------
