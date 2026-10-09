@@ -1,12 +1,10 @@
 <script setup lang="ts">
-// @ts-nocheck
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../../stores/authStore'
 import { storeToRefs } from 'pinia'
-import { getDependenciaName } from '../../../data/mockDependencias'
-import type { Subdependencia } from '../../../data/mockDependencias'
 import { areasApi } from '../../../api/areas'
+import client from '../../../api/client'
 import { useToast } from 'vue-toastification'
 import { 
     Network, 
@@ -23,16 +21,34 @@ if (!currentUser.value || (currentUser.value?.rol !== 1 && currentUser.value?.ro
     router.push({ name: 'dashboard' })
 }
 
-const companyId = computed(() => (currentUser.value as any)?.idDependencia ?? (currentUser.value as any)?.dependencia_id ?? 0)
-const companyName = computed(() => getDependenciaName(companyId.value))
+/** Subárea operativa de la empresa: recurso `areas` del backend. */
+interface AreaOperativa {
+    idSubdependencia: number
+    idDependencia: number | null
+    codigo: string
+    nombre: string
+    descripcion: string | null
+    activo: boolean
+}
+
+const companyName = ref<string>((currentUser.value as any)?.dependencia?.nombre || 'Empresa')
 
 const toast = useToast()
-const localSubareas = ref<Subdependencia[]>([])
+const localSubareas = ref<AreaOperativa[]>([])
 const loading = ref(false)
 
 const fetchAreas = async () => {
     loading.value = true
     try {
+        // Nombre real de la empresa desde el backend (fuente: dependencia en sesión)
+        client.get('/empresa')
+            .then(r => r.data)
+            .then(res => {
+                const empresa = res?.data || res
+                if (empresa?.nombre) companyName.value = empresa.nombre
+            })
+            .catch(() => {})
+
         const res = await areasApi.list()
         const list = res.data || res
         const arr = Array.isArray(list) ? list : []
@@ -117,8 +133,9 @@ const saveSubarea = async () => {
         if (isEditing.value) {
             const updated = await areasApi.update(form.value.idSubdependencia, payload)
             const idx = localSubareas.value.findIndex(s => s.idSubdependencia === form.value.idSubdependencia)
-            if (idx !== -1) localSubareas.value[idx] = { 
-                ...localSubareas.value[idx], 
+            const current = localSubareas.value[idx]
+            if (idx !== -1 && current) localSubareas.value[idx] = {
+                ...current,
                 codigo: updated.codigo || payload.codigo,
                 nombre: updated.nombre || payload.nombre,
                 descripcion: updated.descripcion || payload.descripcion
@@ -177,8 +194,10 @@ const saveSubarea = async () => {
                             <div class="user-info w-full">
                                 <h4>{{ area.nombre }}</h4>
                                 <div class="user-meta mt-1">
-                                    <span class="user-badge">Área Activa</span>
-                                    <span class="text-xs text-slate-500 block mt-1">ID: REF-{{ area.idSubdependencia }}</span>
+                                    <span class="user-badge">{{ area.activo ? 'Área Activa' : 'Inactiva' }}</span>
+                                    <span class="text-xs text-slate-500 block mt-1">
+                                        Código: {{ area.codigo || '—' }} · ID: REF-{{ area.idSubdependencia }}
+                                    </span>
                                 </div>
                             </div>
                             <div class="ml-auto flex items-center text-slate-300 group-hover:text-blue-500 transition-colors">
@@ -213,14 +232,12 @@ const saveSubarea = async () => {
                     
                     <div class="p-6 overflow-y-auto form-modal-content">
                         <div class="form-group mb-0">
-                            <label>Nombre del Área o Subdependencia</label>
+                            <label>Código del Área</label>
+                            <input type="text" v-model="form.codigo" class="editable-input" placeholder="Ej. PLANTA-1" />
+                            <label class="mt-4">Nombre del Área o Subdependencia</label>
                             <input type="text" v-model="form.nombre" class="editable-input" placeholder="Ej. Línea de Producción 1" />
-                            <label>Responsable Dependencia</label>
-                            <input type="text" class="editable-input" placeholder = "Responsable Dependencia"/>
-                            <label>Correo principal</label>
-                            <input type="text" class="editable-input" placeholder = "Ej. correo_principal@empresa.com"/>
-                            <label>Correo secundario</label>
-                            <input type="text" class="editable-input" placeholder = "Ej. correo_secundario@empresa.com"/>
+                            <label class="mt-4">Descripción</label>
+                            <textarea v-model="form.descripcion" rows="3" class="editable-input" placeholder="Notas internas del área (opcional)"></textarea>
                         </div>
                     </div>
                     

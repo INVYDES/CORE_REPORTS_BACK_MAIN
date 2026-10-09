@@ -40,6 +40,21 @@ class Usuario extends Authenticatable
         'rol' => 'integer',
     ];
 
+    public function getIdUsuarioAttribute(): int
+    {
+        return $this->id;
+    }
+
+    public function getIdDependenciaAttribute(): ?int
+    {
+        return $this->dependencia_id;
+    }
+
+    public function getCorreoAttribute(): string
+    {
+        return $this->email;
+    }
+
     public function dependencia(): BelongsTo
     {
         return $this->belongsTo(Dependencia::class, 'dependencia_id');

@@ -174,4 +174,43 @@ class TicketController extends Controller
 
         return response()->json($ticket->load('asignado'));
     }
+
+    /**
+     * GET /api/v1/tecnicos o /api/tecnicos
+     * Obtiene los usuarios y técnicos de la empresa para asignación
+     */
+    public function tecnicos(Request $request): JsonResponse
+    {
+        $idEmpresa = $request->user()->dependencia_id ?? $request->user()->id_dependencia;
+
+        $tecnicos = Usuario::where('dependencia_id', $idEmpresa)
+            ->where('estado', true)
+            ->orderBy('nombre', 'asc')
+            ->get()
+            ->map(function ($u) {
+                // Se devuelven alias camelCase y snake_case para que cualquier
+                // selector del front (ejecutores, asignación, filtros) lo consuma
+                // como reemplazo directo de /usuarios, que está paginado.
+                return [
+                    'id' => $u->id,
+                    'idUsuario' => $u->id,
+                    'id_usuario' => $u->id,
+                    'idDependencia' => (int) $u->dependencia_id,
+                    'dependencia_id' => (int) $u->dependencia_id,
+                    'nombre' => $u->nombre,
+                    'apellidos' => $u->apellidos ?: '',
+                    'correo' => $u->email,
+                    'email' => $u->email,
+                    'rol' => (int) $u->rol,
+                    'estado' => (bool) $u->estado,
+                    'numeroEmpleado' => $u->numero_empleado ?: ('EMP-'.str_pad((string) $u->id, 3, '0', STR_PAD_LEFT)),
+                    'numero_empleado' => $u->numero_empleado,
+                ];
+            });
+
+        return response()->json([
+            'success' => true,
+            'data' => $tecnicos,
+        ], 200);
+    }
 }

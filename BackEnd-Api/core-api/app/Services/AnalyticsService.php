@@ -86,6 +86,6 @@ class AnalyticsService
 
     public function conteoOperacion(int $dependenciaId)
     {
-        return DB::table('vw_conteo_operacion')->where('dependencia_id',$dependenciaId)->first();
+        return DB::table('vw_conteo_operacion')->where('dependencia_id', $dependenciaId)->first();
     }
 }

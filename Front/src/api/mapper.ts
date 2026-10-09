@@ -1,5 +1,6 @@
-// @ts-nocheck
-const categoriaMap = {
+type BackendPayload = Record<string, any>
+
+const categoriaMap: Record<string, string> = {
   'Mantenimiento Preventivo': 'preventivo',
   'Mantenimiento Correctivo': 'correctivo',
   'Instalación': 'instalacion',
@@ -14,7 +15,7 @@ const categoriaMap = {
   'diagnostico': 'diagnostico',
 }
 
-const tipoMap = {
+const tipoMap: Record<string, string> = {
   'Ticket': 'ticket',
   'Servicio Programado': 'servicio',
   'Libre': 'libre',
@@ -23,12 +24,12 @@ const tipoMap = {
   'libre': 'libre',
 }
 
-const prioridadMap = {
+const prioridadMap: Record<string, string> = {
   'Baja': 'baja', 'Media': 'media', 'Alta': 'alta',
   'baja': 'baja', 'media': 'media', 'alta': 'alta',
 }
 
-const estatusReporteMap = {
+const estatusReporteMap: Record<string, string> = {
   'Abierto / Trabajo Parcial': 'parcial',
   'Abierto': 'abierto',
   'Cerrado / Trabajo Finalizado': 'finalizado',
@@ -36,8 +37,8 @@ const estatusReporteMap = {
   'parcial': 'parcial', 'finalizado': 'finalizado',
 }
 
-function clean(obj) {
-  const out = {}
+function clean(obj: Record<string, any>): BackendPayload {
+  const out: BackendPayload = {}
   for (const [k, v] of Object.entries(obj)) {
     if (v === null || v === undefined || v === '') continue
     if (typeof v === 'string') {
@@ -49,14 +50,14 @@ function clean(obj) {
   return out
 }
 
-function toMysqlDatetime(val) {
+function toMysqlDatetime(val: any): string | null {
   if (!val) return null
   const d = new Date(val)
   if (isNaN(d.getTime())) return null
   return d.toISOString().slice(0, 19).replace('T', ' ')
 }
 
-export function mapTicketForBackend(front) {
+export function mapTicketForBackend(front: any): BackendPayload {
   const raw = {
     folio: front.folio || undefined, // backend genera si falta
     asunto: front.asunto,
@@ -71,7 +72,7 @@ export function mapTicketForBackend(front) {
   return clean(raw)
 }
 
-export function mapServicioForBackend(front) {
+export function mapServicioForBackend(front: any): BackendPayload {
   const raw = {
     folio: front.folio || undefined,
     asunto: front.asunto,
@@ -88,7 +89,7 @@ export function mapServicioForBackend(front) {
   return clean(raw)
 }
 
-export function mapReporteForBackend(front, fileList = []) {
+export function mapReporteForBackend(front: any, fileList: File[] = []): BackendPayload {
   const tipo = tipoMap[front.tipoReporte] || 'libre'
   const categoria = categoriaMap[front.categoria] || 'correctivo'
   const estatus = estatusReporteMap[front.estatusReporte] || 'parcial'
@@ -112,14 +113,14 @@ export function mapReporteForBackend(front, fileList = []) {
     estatus,
     area_id: front.idSubdependencia || null,
     es_retrabajo: !!front.esRetrabajo,
-    ejecutores: (front.ejecutoresIds || []).filter(id => id && id !== 0),
+    ejecutores: (front.ejecutoresIds || []).filter((id: any) => id && id !== 0),
     _materialesRaw: front.materiales || [],
     _files: fileList,
   }
   return clean(payload)
 }
 
-export async function buildReporteFormData(mapped, client) {
+export async function buildReporteFormData(mapped: BackendPayload, client: any): Promise<FormData> {
   const fd = new FormData()
   const folio = `REP-${Date.now().toString().slice(-6)}`
   fd.append('folio', folio)
@@ -137,16 +138,16 @@ export async function buildReporteFormData(mapped, client) {
   if (mapped.area_id) fd.append('area_id', String(mapped.area_id))
   if (mapped.es_retrabajo) fd.append('es_retrabajo', '1')
 
-  mapped.ejecutores.forEach(id => fd.append('ejecutores[]', String(id)))
+  mapped.ejecutores.forEach((id: any) => fd.append('ejecutores[]', String(id)))
 
   if (mapped._materialesRaw.length) {
     try {
       const catRes = await client.get('/materiales', { params: { per_page: 100 } })
       const cat = catRes.data?.data || catRes.data || []
-      mapped._materialesRaw.forEach((m, idx) => {
+      mapped._materialesRaw.forEach((m: any, idx: number) => {
         let matId = m.material_id
         if (!matId && m.material) {
-          const found = cat.find(c => c.nombre.toLowerCase() === m.material.toLowerCase().trim())
+          const found = cat.find((c: any) => c.nombre.toLowerCase() === m.material.toLowerCase().trim())
           matId = found?.id || cat[0]?.id
         }
         if (matId) {
@@ -154,10 +155,10 @@ export async function buildReporteFormData(mapped, client) {
           fd.append(`materiales[${idx}][cantidad]`, String(m.cantidad || 1))
         }
       })
-    } catch {}
+    } catch { /* no-op */ }
   }
 
-  ;(mapped._files || []).forEach(f => fd.append('evidencias[]', f))
+  ;(mapped._files || []).forEach((f: File) => fd.append('evidencias[]', f))
 
   return fd
 }

@@ -1,5 +1,4 @@
 <script setup lang="ts">
-// @ts-nocheck
     import { ref, onMounted, computed } from 'vue'
     import { useRouter } from 'vue-router'
 
@@ -38,7 +37,6 @@ import client from '../../../api/client'
         const u = users.value.find((x: any) => x.id === id)
         return u ? `${u.nombre} ${u.apellidos}`.trim() : 'Usuario Desconocido'
     }
-    const userName = getUserName
 
     // Get the Title/Folio of the parent Ticket or Service (resuelto en el fetch con datos reales)
     const getOrigenDetails = (reporte: any) => {
@@ -90,15 +88,15 @@ import client from '../../../api/client'
                     estatusReporte: estatusLabel(x.estatus),
                 }
             })
-        } catch {}
+        } catch { /* no-op */ }
     }
 
     const loadUsers = async () => {
         try {
-            const res = await client.get('/usuarios', { params: { per_page: 100 } }).then(r => r.data)
+            const res = await client.get('/tecnicos').then(r => r.data)
             const list = res.data || res || []
             if (Array.isArray(list)) users.value = list
-        } catch {}
+        } catch { /* no-op */ }
     }
 
     const loadSurveys = async () => {
@@ -106,7 +104,7 @@ import client from '../../../api/client'
             const res = await client.get('/encuestas', { params: { per_page: 100 } }).then(r => r.data)
             const list = res.data || res || []
             if (Array.isArray(list)) surveyIds.value = new Set(list.map((e: any) => e.reporte_id))
-        } catch {}
+        } catch { /* no-op */ }
     }
 
     onMounted(() => { loadReports(); loadUsers(); loadSurveys() })

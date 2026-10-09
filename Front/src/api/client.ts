@@ -44,11 +44,14 @@ client.interceptors.response.use(
       if (!esLogin && !yaReintentado && getToken()) {
         error.config._revalidado = true
         try {
-          revalidando = revalidando ?? client.get('/me').then(() => undefined)
+          // /me con _revalidado: si el token ya era inválido, este request
+          // también falla con 401 y cae al else-if -> forzarLogout().
+          revalidando = revalidando ?? client.get('/me', { _revalidado: true } as any).then(() => undefined)
           await revalidando
           return client.request(error.config)
         } catch {
           forzarLogout()
+          return Promise.reject(error)
         } finally {
           revalidando = null
         }

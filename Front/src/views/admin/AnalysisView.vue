@@ -376,7 +376,7 @@ const myOriginalServices = computed(() => mockServices.filter((s: Service) => s.
 const realTechs = ref<any[]>([])
 onMounted(async () => {
     try {
-        const res = await client.get('/usuarios', { params: { per_page: 100 } }).then(r=>r.data)
+        const res = await client.get('/tecnicos').then(r=>r.data)
         const list = res.data || res
         realTechs.value = Array.isArray(list) ? list.filter((u:any)=> [1,3].includes(u.rol)).map((u:any)=> ({ id: u.id, nombre: `${u.nombre} ${u.apellidos}` })) : []
     } catch {}
@@ -412,12 +412,34 @@ const myServices = computed(() => {
 })
 
 
-const totalReportes = computed(() => myReports.value.length)
+const totalReportes = computed(() => {
+    const c = analyticsData.value?.conteo
+    if (c && c.cantidad_reportes_generados !== undefined) return Number(c.cantidad_reportes_generados) || 0
+    return myReports.value.length
+})
 
 // 4. KPI Calculations (Volumes)
-const totalTicketsReportes = computed(() => myReports.value.filter(r => r.tipoReporte === 'Ticket').length)
-const totalServiciosReportes = computed(() => myReports.value.filter(r => r.tipoReporte === 'Servicio Programado').length)
-const totalLibresReportes = computed(() => myReports.value.filter(r => r.tipoReporte === 'Libre').length)
+const totalTicketsReportes = computed(() => {
+    const v = analyticsData.value?.volumen
+    if (Array.isArray(v) && v.length) {
+        return (v.find((x: any) => x.tipo === 'ticket')?.total || 0)
+    }
+    return myReports.value.filter(r => r.tipoReporte === 'Ticket').length
+})
+const totalServiciosReportes = computed(() => {
+    const v = analyticsData.value?.volumen
+    if (Array.isArray(v) && v.length) {
+        return (v.find((x: any) => x.tipo === 'servicio')?.total || 0)
+    }
+    return myReports.value.filter(r => r.tipoReporte === 'Servicio Programado').length
+})
+const totalLibresReportes = computed(() => {
+    const v = analyticsData.value?.volumen
+    if (Array.isArray(v) && v.length) {
+        return (v.find((x: any) => x.tipo === 'libre')?.total || 0)
+    }
+    return myReports.value.filter(r => r.tipoReporte === 'Libre').length
+})
 
 // totalHoras: Sum diff between fechaHoraInicio and fechaHoraFin across 'Cerrado / Trabajo Finalizado' reports
 const totalHoras = computed(() => {
@@ -687,7 +709,20 @@ const percentConformity = computed(() => {
 // Technician Hours Map
 const technicianHoursMap = computed(() => {
     const map = new Map<number, number>()
-    
+
+    // Datos reales de la API (vista vw_horas_por_tecnico)
+    const apiHoras = analyticsData.value?.horas_por_tecnico
+    if (Array.isArray(apiHoras) && apiHoras.length) {
+        apiHoras.forEach((r: any) => {
+            const id = Number(r.usuario_id)
+            const horas = parseFloat(r.horas || 0)
+            if (selectedTechnician.value === null || id === selectedTechnician.value) {
+                map.set(id, (map.get(id) || 0) + horas)
+            }
+        })
+        return map
+    }
+
     myReports.value.forEach((report: Reporte) => {
         if (report.estatusReporte === 'Cerrado / Trabajo Finalizado' && report.fechaHoraInicio && report.fechaHoraFin) {
             const start = new Date(report.fechaHoraInicio).getTime()
@@ -711,8 +746,10 @@ const technicianHoursMap = computed(() => {
 const sortedTechnicianData = computed(() => {
     const data: { name: string, hours: number }[] = []
     technicianHoursMap.value.forEach((val: number, id: number) => {
+        // Preferir nombres reales de la API (usuarios), fallback a mockUsers
+        const real = realTechs.value.find((u: any) => u.id === id)
         const user = mockUsers.find((u: Usuario) => u.idUsuario === id)
-        const name = user ? `${user.nombre} ${user.apellidos}` : `Usuario ${id}`
+        const name = real ? real.nombre : (user ? `${user.nombre} ${user.apellidos}` : `Usuario ${id}`)
         data.push({ name, hours: Number(val.toFixed(1)) })
     })
     return data.sort((a, b) => b.hours - a.hours) // Sort descending
@@ -727,6 +764,16 @@ const chart1TimelineData = computed(() => {
     const proactiveData: number[] = []
     const reactiveData: number[] = []
     const now = new Date()
+
+    // Datos reales de la API (vista vw_proactivo_reactivo)
+    const pr = analyticsData.value?.proactivo_reactivo
+    if (pr !== null && pr !== undefined && (pr.proactivo !== undefined || pr.reactivo !== undefined)) {
+        const label = timeFilter.value === 'Histórico' ? 'Todo' : timeFilter.value
+        labels.push(label)
+        proactiveData.push(parseInt(pr.proactivo || 0, 10))
+        reactiveData.push(parseInt(pr.reactivo || 0, 10))
+        return { labels, proactiveData, reactiveData }
+    }
 
     switch (timeFilter.value) {
         case 'Hoy': {

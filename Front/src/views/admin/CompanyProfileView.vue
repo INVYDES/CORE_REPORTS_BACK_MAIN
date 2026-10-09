@@ -1,5 +1,4 @@
 <script setup lang="ts">
-// @ts-nocheck
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/authStore'
@@ -27,8 +26,6 @@ if (!currentUser.value || currentUser.value?.rol !== 2) {
     router.push({ name: 'dashboard' })
 }
 
-const depId = computed(() => (currentUser.value as any)?.dependencia_id ?? (currentUser.value as any)?.idDependencia)
-
 const planLabel = (code: string) => ({ trial: 'Trial', mensual: 'Mensual', anual: 'Anual' } as any)[code] || code || '—'
 const tierLabel = (limit: number) => {
     if (!limit) return 'Básico'
@@ -44,23 +41,26 @@ const savingCompany = ref(false)
 
 const mapCompany = (raw: any) => {
     if (!raw) return null
+    const limite = raw.limiteUsuarios ?? raw.limite_usuarios ?? 0
     return {
-        idDependencia: raw.id,
+        idDependencia: raw.idDependencia ?? raw.id,
         nombre: raw.nombre || '',
-        correoContacto: raw.correo_contacto || '',
-        correoReportes: raw.correo_reportes || '',
+        rfc: raw.rfc || '',
+        correoContacto: raw.correoContacto || raw.correo_contacto || '',
+        correoReportes: raw.correoReportes || raw.correo_reportes || '',
         telefono: raw.telefono || '',
-        tipoLicencia: planLabel(raw.tipo_licencia),
-        fechaExpiracionLicencia: fmtDate(raw.fecha_expiracion),
-        limiteUsuarios: raw.limite_usuarios || 0,
-        nivelUsuarios: tierLabel(raw.limite_usuarios)
+        tipoLicencia: planLabel(raw.tipoLicencia ?? raw.tipo_licencia),
+        fechaExpiracionLicencia: fmtDate(raw.fechaExpiracionLicencia ?? raw.fecha_expiracion),
+        limiteUsuarios: limite,
+        nivelUsuarios: tierLabel(limite),
+        logo: raw.logo || ''
     }
 }
 
 const loadCompany = async () => {
-    if (!depId.value) return
     try {
-        const res = await client.get(`/dependencias/${depId.value}`).then(r => r.data)
+        // El endpoint /empresa resuelve la dependencia del usuario en sesión
+        const res = await client.get('/empresa').then(r => r.data)
         company.value = mapCompany(res.data || res)
     } catch {
         company.value = null
@@ -71,9 +71,11 @@ const saveCompany = async () => {
     if (!company.value) return
     savingCompany.value = true
     try {
-        const res = await client.put(`/dependencias/${company.value.idDependencia}`, {
-            correo_contacto: company.value.correoContacto,
-            correo_reportes: company.value.correoReportes,
+        const res = await client.put('/empresa', {
+            nombre: company.value.nombre,
+            rfc: company.value.rfc,
+            correoContacto: company.value.correoContacto,
+            correoReportes: company.value.correoReportes,
             telefono: company.value.telefono
         }).then(r => r.data)
         company.value = mapCompany(res.data || res)
@@ -83,6 +85,56 @@ const saveCompany = async () => {
     } finally {
         savingCompany.value = false
     }
+}
+
+// 2.b Logotipo de la empresa (multipart hacia /empresa/logo)
+const logoInput = ref<HTMLInputElement | null>(null)
+const uploadingLogo = ref(false)
+const isDraggingLogo = ref(false)
+const MAX_LOGO_BYTES = 4 * 1024 * 1024
+
+const pickLogo = () => logoInput.value?.click()
+
+const uploadLogo = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+        toast.error('El archivo debe ser una imagen (PNG, JPG o WEBP)')
+        return
+    }
+    if (file.size > MAX_LOGO_BYTES) {
+        toast.error('La imagen no debe superar los 4 MB')
+        return
+    }
+
+    uploadingLogo.value = true
+    try {
+        const formData = new FormData()
+        formData.append('logo', file)
+
+        const res = await client.post('/empresa/logo', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }
+        }).then(r => r.data)
+
+        const data = res.data || res
+        if (company.value) company.value.logo = data.logo || company.value.logo
+        toast.success('Logotipo actualizado')
+    } catch (e: any) {
+        toast.error(e?.response?.data?.message || 'No se pudo subir el logotipo')
+    } finally {
+        uploadingLogo.value = false
+    }
+}
+
+const onLogoSelected = (event: Event) => {
+    const input = event.target as HTMLInputElement
+    const file = input.files?.[0]
+    if (file) uploadLogo(file)
+    input.value = ''
+}
+
+const onLogoDropped = (event: DragEvent) => {
+    isDraggingLogo.value = false
+    const file = event.dataTransfer?.files?.[0]
+    if (file) uploadLogo(file)
 }
 
 // 3. Team members: real users of this dependencia
@@ -287,11 +339,28 @@ onMounted(() => { loadCompany(); loadUsers() })
                         <!-- Right Side: Logo Upload -->
                         <div class="logo-area">
                             <label class="block mb-2 font-medium text-slate-700 text-sm">Logotipo de la empresa</label>
-                            <div class="upload-box border-dashed">
-                                <UploadCloud :size="32" class="text-slate-400 mb-2"/>
-                                <span class="text-sm text-blue-600 font-semibold cursor-pointer py-1">Haz clic para subir</span>
-                                <span class="text-xs text-slate-500 mt-1">o arrastra y suelta tu imagen aquí</span>
-                                <span class="text-xs text-slate-400 mt-2">PNG o JPG (Max 2MB)</span>
+                            <div
+                                class="upload-box border-dashed"
+                                :class="{ 'is-dragging': isDraggingLogo, 'is-locked': uploadingLogo }"
+                                role="button"
+                                tabindex="0"
+                                @click="pickLogo"
+                                @keydown.enter.prevent="pickLogo"
+                                @keydown.space.prevent="pickLogo"
+                                @dragover.prevent="isDraggingLogo = true"
+                                @dragleave.prevent="isDraggingLogo = false"
+                                @drop.prevent="onLogoDropped"
+                            >
+                                <img v-if="company.logo" :src="company.logo" alt="Logotipo de la empresa" class="logo-preview" />
+                                <template v-if="!company.logo">
+                                    <UploadCloud :size="32" class="text-slate-400 mb-2"/>
+                                    <span class="text-xs text-slate-400 mt-2">PNG, JPG o WEBP (Max 4 MB)</span>
+                                </template>
+                                <span class="text-sm text-blue-600 font-semibold cursor-pointer py-1">
+                                    {{ uploadingLogo ? 'Subiendo...' : (company.logo ? 'Cambiar logotipo' : 'Haz clic para subir') }}
+                                </span>
+                                <span v-if="!company.logo" class="text-xs text-slate-500 mt-1">o arrastra y suelta tu imagen aquí</span>
+                                <input ref="logoInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml" class="hidden" @change="onLogoSelected" />
                             </div>
                         </div>
                     </div>
@@ -624,6 +693,22 @@ onMounted(() => { loadCompany(); loadUsers() })
 .upload-box:hover {
     border-color: #3b82f6;
     background: #f0f9ff;
+}
+.upload-box.is-dragging {
+    border-color: #2563eb;
+    background: #eff6ff;
+}
+.upload-box.is-locked {
+    opacity: 0.7;
+    pointer-events: none;
+}
+.upload-box input[type="file"] {
+    display: none;
+}
+.logo-preview {
+    max-height: 90px;
+    max-width: 100%;
+    object-fit: contain;
 }
 
 /* SECTION B: Users Grid */

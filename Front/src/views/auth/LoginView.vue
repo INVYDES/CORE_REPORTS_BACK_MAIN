@@ -3,13 +3,14 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/authStore'
 import { useToast } from 'vue-toastification'
+import loginImageUrl from '../../assets/login-image.png'
 
 const router = useRouter()
 const auth = useAuthStore()
 const toast = useToast()
 
-const email = ref('admin.tec@core.com')
-const password = ref('password')
+const email = ref('')
+const password = ref('')
 const rememberMe = ref(false)
 const isLoading = ref(false)
 const errorMsg = ref('')
@@ -20,9 +21,12 @@ const handleLogin = async () => {
   try {
     await auth.login(email.value, password.value)
     toast.success('Bienvenido')
-    // Respeta ?redirect= tras el login (session expiry, deep-links)
+    // Navegación completa para arrancar la SPA limpia: el worker re-evalúa
+    // con la cookie jwt ya seteada y no quedan requests en vuelo que puedan
+    // disparar un 401->auth:expirado y revertir el redirect.
     const redirect = router.currentRoute.value.query.redirect as string | undefined
-    router.push(redirect && redirect.startsWith('/') ? redirect : { name: 'dashboard' })
+    const dest = redirect && redirect.startsWith('/') && !redirect.startsWith('/login') ? redirect : '/app/dashboard'
+    router.push(dest)
   } catch (e: any) {
     const status = e?.response?.status
     if (status === 419) {
@@ -68,7 +72,7 @@ const handleLogin = async () => {
                 <input 
                 v-model="email" 
                 type="email" 
-                placeholder="admin.tec@core.com" 
+                placeholder="correo@ejemplo.com" 
                 required 
                 />
             </div>
@@ -106,7 +110,7 @@ const handleLogin = async () => {
 
     <!-- Panel derecho -->
     <div class="right-pane">
-        <img src = "/src/assets/login-image.png" alt = "Login Visual" class = "login-image" />
+        <img :src="loginImageUrl" alt="Login Visual" class="login-image" />
     </div>
 
     </div>

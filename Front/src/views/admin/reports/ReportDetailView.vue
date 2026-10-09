@@ -1,5 +1,4 @@
 <script setup lang="ts">
-// @ts-nocheck
     import { ref, onMounted, reactive, computed } from 'vue'
     import { useRoute, useRouter } from 'vue-router'
     import { ArrowLeft, User, Calendar, Clock, CheckCircle2, FileText, Wrench, Building2 } from 'lucide-vue-next'
@@ -83,17 +82,17 @@ import client from '../../../api/client'
             report.value = null
         }
         try {
-            const res = await client.get('/usuarios', { params: { per_page: 100 } }).then(r => r.data)
+            const res = await client.get('/tecnicos').then(r => r.data)
             const list = res.data || res || []
             if (Array.isArray(list)) users.value = list
-        } catch {}
+        } catch { /* no-op */ }
         try {
             const res = await client.get('/areas', { params: { per_page: 100 } }).then(r => r.data)
             const list = res.data || res || []
             if (Array.isArray(list)) areas.value = list
-        } catch {}
+        } catch { /* no-op */ }
     }
-    onMounted(loadReport)
+    onMounted(() => { loadReport(); loadEmpresa() })
 
     const getUserName = (id: number | null) => {
         if (!id) return 'Sin Asignar'
@@ -230,14 +229,24 @@ import client from '../../../api/client'
     }
 
     // === Print helpers ===
+    // Datos de la empresa (logotipo y nombre) para el encabezado del PDF/impresión.
+    const empresa = ref<any>(null)
+    const loadEmpresa = async () => {
+        try {
+            const res = await client.get('/empresa').then(r => r.data)
+            empresa.value = res.data || res
+        } catch {
+            empresa.value = null
+        }
+    }
+
     const companyName = computed(() => {
-        if (!report.value) return ''
-        return (currentUser.value as any)?.dependencia?.nombre || 'Empresa'
+        return empresa.value?.nombre
+            || (currentUser.value as any)?.dependencia?.nombre
+            || 'Empresa'
     })
 
-    const companyLogo = computed(() => {
-        return '' // No hay logo por API
-    })
+    const companyLogo = computed(() => empresa.value?.logo || '')
 
     const getResponsableUser = computed(() => {
         if (!report.value || !report.value.responsableId) return null
@@ -616,7 +625,7 @@ import client from '../../../api/client'
                 </thead>
                 <tbody>
                     <tr v-for="(mat, idx) in report.materiales" :key="mat.idItem">
-                        <td>{{ idx + 1 }}</td>
+                        <td>{{ Number(idx) + 1 }}</td>
                         <td>{{ mat.material }}</td>
                         <td>{{ mat.cantidad }}</td>
                         <td>{{ mat.unidad }}</td>

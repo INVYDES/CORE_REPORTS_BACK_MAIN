@@ -34,7 +34,7 @@ onMounted(async ()=>{
             client.get('/tickets', { params:{ per_page:100 } }).then(r=>r.data).catch(()=>({data:[]})),
             client.get('/servicios', { params:{ per_page:100 } }).then(r=>r.data).catch(()=>({data:[]})),
             client.get('/reportes', { params:{ per_page:100 } }).then(r=>r.data).catch(()=>({data:[]})),
-            client.get('/usuarios', { params:{ per_page:100 } }).then(r=>r.data).catch(()=>({data:[]})),
+            client.get('/tecnicos').then(r=>r.data).catch(()=>({data:[]})),
         ])
         rawTickets.value = tRes.data || tRes || []
         rawServices.value = sRes.data || sRes || []

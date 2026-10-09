@@ -1,18 +1,17 @@
 <script setup lang="ts">
-// @ts-nocheck
     import { ref, onMounted, computed } from 'vue'
     import { useRouter } from 'vue-router'
     import { Search, Filter, ChevronRight, X} from 'lucide-vue-next'
 
 
-    // Import global data
-    import { mockServices } from '../../../data/mockServicios'
 import client from '../../../api/client'
+    import { useToast } from 'vue-toastification'
 
     import type { Service } from '../../../data/mockServicios'
 
     const router = useRouter()
-    const services = ref<Service[]>(mockServices)
+    const toast = useToast()
+    const services = ref<Service[]>([])
 
     const statusLabel = (code: string) => ({ programado: 'Programado', en_proceso: 'En Proceso', realizado: 'Realizado', vencido: 'Vencido' } as any)[code] || code
     const priorityLabel = (code: string | null) => ({ alta: 'Alta', media: 'Media', baja: 'Baja' } as any)[code || ''] || code || ''
@@ -34,10 +33,14 @@ import client from '../../../api/client'
                     prioridad: priorityLabel(x.prioridad),
                     fechaAsignacion: fmtShort(x.fecha_asignacion),
                     fechaVencimiento: fmtShort(x.fecha_vencimiento),
-                    asignadoA: x.asignado ? `${x.asignado.nombre || ''} ${x.asignado.apellidos || ''}`.trim() : ''
+                    asignadoA: x.asignado ? `${x.asignado.nombre || ''} ${x.asignado.apellidos || ''}`.trim() : '',
+                    solicitante: x.solicitante || '',
+                    cargo: x.cargo || ''
                 }))
             }
-        } catch {}
+        } catch (e: any) {
+            toast.error(e?.response?.data?.message || 'No se pudieron cargar los servicios')
+        }
     }
     onMounted(fetchServices)
 

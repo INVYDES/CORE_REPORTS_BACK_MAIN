@@ -1,5 +1,4 @@
 <script setup lang="ts">
-// @ts-nocheck
     import { ref, computed, onMounted } from 'vue'
     import { useRouter } from 'vue-router'
     import { Search, Filter, ChevronRight, X } from 'lucide-vue-next'
@@ -10,14 +9,14 @@
     const authStore = useAuthStore()
     const { currentUser } = storeToRefs(authStore)
 
-    // Import global data
-    import { mockTickets } from '../../../data/mockTickets'
 import client from '../../../api/client'
+    import { useToast } from 'vue-toastification'
 
     import type { Ticket } from '../../../data/mockTickets'
 
     const router = useRouter()
-    const tickets = ref<Ticket[]>(mockTickets)
+    const toast = useToast()
+    const tickets = ref<Ticket[]>([])
 
     const statusLabel = (code: string) => ({ abierto: 'Abierto', en_proceso: 'En Proceso', resuelto: 'Resuelto', cerrado: 'Cerrado' } as any)[code] || code
     const priorityLabel = (code: string) => ({ alta: 'Alta', media: 'Media', baja: 'Baja' } as any)[code] || code
@@ -43,7 +42,9 @@ import client from '../../../api/client'
                     atendio: x.asignado ? `${x.asignado.nombre || ''} ${x.asignado.apellidos || ''}`.trim() : ''
                 }))
             }
-        } catch {}
+        } catch (e: any) {
+            toast.error(e?.response?.data?.message || 'No se pudieron cargar los tickets')
+        }
     }
     onMounted(fetchTickets)
 

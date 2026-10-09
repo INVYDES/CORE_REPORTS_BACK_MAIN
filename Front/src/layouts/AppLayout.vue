@@ -1,11 +1,11 @@
 <script setup lang="ts">
-  import { ref, onMounted } from 'vue';
+  import { ref, onMounted, defineAsyncComponent } from 'vue';
   import { useAuthStore } from '../stores/authStore';
   import { storeToRefs } from 'pinia';
   import AppSidebar from '../components/shared/AppSidebar.vue';
   import AppHeader from '../components/shared/AppHeader.vue';
-  import ReportCreateView from '../views/admin/reports/ReportCreateView.vue';
-  import TicketCreateView from '../views/admin/tickets/TicketCreateView.vue';
+  const ReportCreateView = defineAsyncComponent(() => import('../views/admin/reports/ReportCreateView.vue'));
+  const TicketCreateView = defineAsyncComponent(() => import('../views/admin/tickets/TicketCreateView.vue'));
 
   const authStore = useAuthStore();
   const { currentUser } = storeToRefs(authStore);
@@ -45,10 +45,12 @@
       <AppHeader v-if="currentUser?.rol !== 0" @toggle-sidebar="toggleSidebar" />
 
       <main class="content-body">
-        <router-view v-slot="{ Component }">
-          <transition name="fade" mode="out-in">
-            <component :is="Component" />
-          </transition>
+        <router-view v-slot="{ Component, route }">
+          <template v-if="Component">
+            <transition name="fade" mode="out-in">
+              <component :is="Component" :key="route.path" />
+            </transition>
+          </template>
         </router-view>
       </main>
 

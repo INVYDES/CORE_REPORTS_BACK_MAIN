@@ -1,4 +1,3 @@
-// @ts-nocheck
 import client from './client'
 import { mapServicioForBackend } from './mapper'
 

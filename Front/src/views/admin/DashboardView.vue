@@ -39,9 +39,9 @@ onMounted(async () => {
         if ((currentUser.value as any)?.rol === 3) {
             const uid = (currentUser.value as any)?.id
             const [tRes, sRes, rRes] = await Promise.all([
-                client.get('/tickets', { params: { per_page: 100 } }).then(r=>r.data).catch(()=>({data:[]})),
-                client.get('/servicios', { params: { per_page: 100 } }).then(r=>r.data).catch(()=>({data:[]})),
-                client.get('/reportes', { params: { per_page: 100 } }).then(r=>r.data).catch(()=>({data:[]})),
+                client.get('/tickets', { params: { usuario_asignado_id: uid, per_page: 500 } }).then(r=>r.data).catch(()=>({data:[]})),
+                client.get('/servicios', { params: { usuario_asignado_id: uid, per_page: 500 } }).then(r=>r.data).catch(()=>({data:[]})),
+                client.get('/reportes', { params: { creado_por: uid, per_page: 500 } }).then(r=>r.data).catch(()=>({data:[]})),
             ])
             const tList = tRes.data || tRes || []
             const sList = sRes.data || sRes || []
@@ -73,7 +73,8 @@ const getStatusClass = (status: string) => {
 </script>
 
 <template>
-    <div class="dashboard-root px-4 mx-auto w-full max-w-7xl" v-if="currentUser">
+    <div class="dashboard-root px-4 mx-auto w-full max-w-7xl">
+      <template v-if="currentUser">
         
         <!-- ========================================== -->
         <!-- ADMIN VIEW (Roles 1 & 2)                  -->
@@ -115,7 +116,7 @@ const getStatusClass = (status: string) => {
                         </div>
                     </div>
                     <div class="card-footer">
-                        <button v-if="currentUser?.rol === 1 || (currentUser?.rol as number) === 3" class="text-blue-600 font-medium text-sm hover:underline" @click="navigateTo('tickets')">Ver todos los tickets &rarr;</button>
+                        <button v-if="currentUser.rol === 1" class="text-blue-600 font-medium text-sm hover:underline" @click="navigateTo('tickets')">Ver todos los tickets &rarr;</button>
                     </div>
                 </div>
 
@@ -149,7 +150,7 @@ const getStatusClass = (status: string) => {
                         </div>
                     </div>
                     <div class="card-footer">
-                        <button v-if="currentUser?.rol === 1 || (currentUser?.rol as number) === 3" class="text-blue-600 font-medium text-sm hover:underline" @click="navigateTo('schedule-list')">Ver cronograma &rarr;</button>
+                        <button v-if="currentUser.rol === 1" class="text-blue-600 font-medium text-sm hover:underline" @click="navigateTo('schedule-list')">Ver cronograma &rarr;</button>
                     </div>
                 </div>
 
@@ -184,7 +185,7 @@ const getStatusClass = (status: string) => {
                         </div>
                     </div>
                     <div class="card-footer">
-                        <button v-if="currentUser?.rol === 1 || (currentUser?.rol as number) === 3" class="text-blue-600 font-medium text-sm hover:underline" @click="navigateTo('reports')">Ir a reportes &rarr;</button>
+                        <button v-if="currentUser.rol === 1" class="text-blue-600 font-medium text-sm hover:underline" @click="navigateTo('reports')">Ir a reportes &rarr;</button>
                     </div>
                 </div>
             </div>
@@ -284,6 +285,7 @@ const getStatusClass = (status: string) => {
                 </div>
             </div>
         </div>
+      </template>
     </div>
 </template>
 

@@ -15,7 +15,7 @@ class Dependencia extends Model
     protected $fillable = [
         'nombre', 'rfc', 'tipo_licencia', 'fecha_expiracion',
         'limite_usuarios', 'limite_reportes_mensuales',
-        'correo_contacto', 'correo_reportes', 'telefono', 'datos_facturacion', 'activa',
+        'correo_contacto', 'correo_reportes', 'telefono', 'datos_facturacion', 'activa', 'logo',
     ];
 
     protected $casts = [
@@ -24,6 +24,21 @@ class Dependencia extends Model
         'limite_usuarios' => 'integer',
         'limite_reportes_mensuales' => 'integer',
     ];
+
+    public function getIdDependenciaAttribute(): int
+    {
+        return $this->id;
+    }
+
+    public function getActivoAttribute(): bool
+    {
+        return (bool) $this->activa;
+    }
+
+    public function getFechaExpiracionLicenciaAttribute()
+    {
+        return $this->fecha_expiracion;
+    }
 
     public function usuarios(): HasMany
     {

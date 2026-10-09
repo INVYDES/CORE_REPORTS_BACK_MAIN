@@ -17,6 +17,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Uploads Disk
+    |--------------------------------------------------------------------------
+    |
+    | Disco donde se persisten los archivos subidos por los usuarios: logotipos
+    | de empresa y evidencias fotograficas de reportes. En produccion apunta al
+    | bucket de Cloudflare R2 (disco "r2"); en local cae al disco "public".
+    |
+    */
+
+    'uploads' => env('FILESYSTEM_UPLOADS_DISK', 'public'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Filesystem Disks
     |--------------------------------------------------------------------------
     |
@@ -56,6 +69,29 @@ return [
             'url' => env('AWS_URL'),
             'endpoint' => env('AWS_ENDPOINT'),
             'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
+            'throw' => false,
+            'report' => false,
+        ],
+
+        // Cloudflare R2: API compatible con S3, sin coste de egress.
+        // Se usa para logotipos y evidencias cuando FILESYSTEM_UPLOADS_DISK=r2.
+        'r2' => [
+            'driver' => 's3',
+            'key' => env('CLOUDFLARE_R2_ACCESS_KEY_ID'),
+            'secret' => env('CLOUDFLARE_R2_SECRET_ACCESS_KEY'),
+            'region' => env('CLOUDFLARE_R2_REGION', 'auto'),
+            'bucket' => env('R2_BUCKET_NAME'),
+            'endpoint' => env(
+                'R2_ENDPOINT_URL',
+                env('CLOUDFLARE_ACCOUNT_ID') ? 'https://'.env('CLOUDFLARE_ACCOUNT_ID').'.r2.cloudflarestorage.com' : null
+            ),
+            // Dominio publico del bucket (r2.dev o dominio propio). Si esta vacio
+            // las URLs se resuelven contra el endpoint path-style del bucket.
+            'url' => env('R2_PUBLIC_URL'),
+            'use_path_style_endpoint' => true,
+            // R2 no soporta ACLs por objeto: el acceso publico se configura en el
+            // bucket (r2.dev o dominio propio), por eso los objetos van privados.
+            'visibility' => 'private',
             'throw' => false,
             'report' => false,
         ],

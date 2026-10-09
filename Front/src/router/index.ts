@@ -54,6 +54,12 @@ const router = createRouter({
             component: () => import('../views/licencias/PendienteView.vue')
         },
 
+        // Cualquier ruta no definida → login
+        {
+            path: '/:pathMatch(.*)*',
+            redirect: { name: 'login' }
+        },
+
         {
             path: '/app',
             component: AppLayout,

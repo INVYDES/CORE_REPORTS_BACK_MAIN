@@ -15,8 +15,8 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->trustProxies(at: '*');
         $middleware->alias([
             'dependencia' => \App\Http\Middleware\ResolveDependencia::class,
-                'licencia' => \App\Http\Middleware\CheckLicencia::class,
-                'singleDevice' => \App\Http\Middleware\EnsureSingleDevice::class,
+            'licencia' => \App\Http\Middleware\CheckLicencia::class,
+            'singleDevice' => \App\Http\Middleware\EnsureSingleDevice::class,
 
         ]);
         $middleware->throttleApi('60,1');

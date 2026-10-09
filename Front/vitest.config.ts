@@ -7,6 +7,11 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'jsdom',
+    // Las cookies de sesión se emiten con Secure/SameSite=Strict (igual que en
+    // producción sobre HTTPS); jsdom solo las persiste si el origen es https.
+    environmentOptions: {
+      jsdom: { url: 'https://localhost/' },
+    },
     include: ['src/**/*.{test,spec}.{js,ts,vue}'],
     coverage: {
       provider: 'v8',

@@ -4,7 +4,6 @@
     import { Bell, Menu, Mail } from 'lucide-vue-next'
     import { useAuthStore } from '../../stores/authStore'
     import { storeToRefs } from 'pinia'
-    import { getDependenciaName } from '../../data/mockDependencias'
     import { notificacionesApi } from '../../api/notificaciones'
 
     const emit = defineEmits(['toggle-sidebar'])
@@ -12,10 +11,7 @@
     const authStore = useAuthStore()
     const { currentUser } = storeToRefs(authStore)
 
-    const enterpriseName = computed(() => {
-        const depId = (currentUser.value as any)?.dependencia_id ?? (currentUser.value as any)?.idDependencia
-        return getDependenciaName(depId)
-    })
+    const enterpriseName = computed(() => (currentUser.value as any)?.dependencia?.nombre || 'CoreReports')
 
     const notifications = ref<any[]>([])
     const showDropdown = ref(false)

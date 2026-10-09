@@ -1,13 +1,8 @@
 <script setup lang="ts">
     import { computed } from 'vue'
-    import { useRoute } from 'vue-router'
+    import { useRoute, useRouter } from 'vue-router'
     import { useAuthStore } from '../../stores/authStore'
     import { storeToRefs } from 'pinia'
-    
-    const authStore = useAuthStore()
-    const { currentUser } = storeToRefs(authStore)
-    import { useRouter } from 'vue-router'
-    const router = useRouter()
     import {
         LayoutDashboard,
         Ticket,
@@ -22,6 +17,10 @@
         FilePlus2,
         CalendarDays
     } from 'lucide-vue-next'
+
+    const authStore = useAuthStore()
+    const { currentUser } = storeToRefs(authStore)
+    const router = useRouter()
 
     const buildTime = __BUILD_TIME__
 
@@ -136,7 +135,7 @@
     const handleLogout = async () => {
         await authStore.logout()
         emit('close')
-        router.push({ name: 'login', query: { redirect: route.fullPath } })
+        router.push({ name: 'login' })
     }
 </script>
 

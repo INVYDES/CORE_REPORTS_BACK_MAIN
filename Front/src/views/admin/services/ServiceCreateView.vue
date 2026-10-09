@@ -27,7 +27,7 @@
             realAreas.value = arr.map((a:any)=> ({ idSubdependencia: a.id, idDependencia: a.dependencia_id, nombre: a.nombre }))
         } catch {}
         try {
-            const u = await client.get('/usuarios', { params:{ per_page:100 } }).then(r=>r.data)
+            const u = await client.get('/tecnicos').then(r=>r.data)
             const list = u.data || u
             realTechs.value = Array.isArray(list) ? list.filter((x:any)=> [1,3].includes(x.rol)).map((x:any)=> ({ idUsuario: x.id, nombre: x.nombre, apellidos: x.apellidos })) : []
         } catch {}

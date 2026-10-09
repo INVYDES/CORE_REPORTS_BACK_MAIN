@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\AreaController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\DependenciaController;
+use App\Http\Controllers\Api\EmpresaController;
 use App\Http\Controllers\Api\EncuestaController;
 use App\Http\Controllers\Api\EquipoController;
 use App\Http\Controllers\Api\HistoryController;
@@ -43,9 +44,15 @@ Route::prefix('v1')->group(function () {
         Route::post('/logout', [AuthController::class, 'logout']);
 
         Route::apiResource('dependencias', DependenciaController::class)->only(['index', 'show', 'update']);
+        Route::get('empresa', [EmpresaController::class, 'show']);
+        Route::put('empresa', [EmpresaController::class, 'update']);
+        Route::post('empresa/logo', [EmpresaController::class, 'uploadLogo']);
+
+        // Las subáreas operativas de una empresa son el recurso `areas`
         Route::apiResource('areas', AreaController::class);
         Route::apiResource('equipos', EquipoController::class);
         Route::apiResource('usuarios', UsuarioController::class);
+        Route::get('tecnicos', [TicketController::class, 'tecnicos']);
         Route::apiResource('tickets', TicketController::class);
         Route::patch('tickets/{ticket}/asignar', [TicketController::class, 'asignar']);
         Route::apiResource('servicios', ServicioController::class);
@@ -56,6 +63,7 @@ Route::prefix('v1')->group(function () {
         Route::post('materiales/{material}/entrada', [MaterialController::class, 'entrada']);
         Route::get('materiales/{material}/movimientos', [MaterialController::class, 'movimientos']);
         Route::apiResource('encuestas', EncuestaController::class)->only(['index', 'store', 'show']);
+        Route::get('encuestas/reporte/{idReporte}', [EncuestaController::class, 'porReporte']);
         Route::post('licencias/{licencia}/comprar-mercadopago', [LicenciaController::class, 'comprarLicenciaMercadoPago']);
         Route::get('licencias/verificar-pago/{paymentId}', [LicenciaController::class, 'verificarPagoMercadoPago']);
 
@@ -99,4 +107,9 @@ Route::middleware(['auth:sanctum', 'dependencia', 'licencia', 'singleDevice'])->
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('history', [HistoryController::class, 'index']);
     Route::get('dashboard', [DashboardController::class, 'index']);
+    Route::get('empresa', [EmpresaController::class, 'show']);
+    Route::put('empresa', [EmpresaController::class, 'update']);
+    Route::post('empresa/logo', [EmpresaController::class, 'uploadLogo']);
+    Route::get('tecnicos', [TicketController::class, 'tecnicos']);
+    Route::get('encuestas/{idReporte}', [EncuestaController::class, 'porReporte']);
 });

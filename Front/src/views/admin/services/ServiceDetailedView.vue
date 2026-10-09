@@ -1,5 +1,4 @@
 <script setup lang="ts">
-// @ts-nocheck
     import { ref, onMounted } from 'vue'
     import { useRoute, useRouter } from 'vue-router'
     import { ArrowLeft, User, Briefcase, Calendar, Clock, CheckCircle2, AlertCircle} from 'lucide-vue-next'
@@ -61,7 +60,7 @@
             service.value = null
         }
         try {
-            const res = await client.get('/usuarios', { params: { per_page: 100 } }).then(r => r.data)
+            const res = await client.get('/tecnicos').then(r => r.data)
             const list = res.data || res || []
             const dep = (currentUser.value as any)?.dependencia_id ?? (currentUser.value as any)?.idDependencia
             technicians.value = (Array.isArray(list) ? list : [])

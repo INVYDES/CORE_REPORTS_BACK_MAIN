@@ -9,10 +9,8 @@ use App\Models\Usuario;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-
-
 use Illuminate\Support\Str;
-
+use Illuminate\Validation\Rules\Password;
 
 class AuthController extends Controller
 {
@@ -119,12 +117,12 @@ class AuthController extends Controller
                 'estado' => true,
             ]);
 
-                            // Generar y registrar un identificador único de dispositivo para el nuevo usuario
-                $deviceId = (string) Str::uuid();
-                $user->current_device = $deviceId;
-                $user->save();
+            // Generar y registrar un identificador único de dispositivo para el nuevo usuario
+            $deviceId = (string) Str::uuid();
+            $user->current_device = $deviceId;
+            $user->save();
 
-                return $dep;
+            return $dep;
         });
 
         $user = Usuario::where('email', $data['email'])->first();
@@ -150,7 +148,6 @@ class AuthController extends Controller
             $user->save();
         }
         $request->user()->currentAccessToken()->delete();
-
 
         return response()->json(['message' => 'logout']);
     }

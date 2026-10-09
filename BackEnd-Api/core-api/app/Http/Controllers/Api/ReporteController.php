@@ -10,15 +10,17 @@ use App\Models\MaterialCatalogo;
 use App\Models\Reporte;
 use App\Models\Usuario;
 use App\Services\InventarioService;
+use App\Services\UploadStorageService;
 use App\Traits\EnsuresDependencia;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
 
 class ReporteController extends Controller
 {
     use EnsuresDependencia;
+
+    public function __construct(private readonly UploadStorageService $uploads) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -135,16 +137,69 @@ class ReporteController extends Controller
                 );
             }
 
+            $carpetaEvidencias = 'evidencias/'.$reporte->dependencia_id;
+
+            // Evidencias por multipart
             if ($request->hasFile('evidencias')) {
                 foreach ($request->file('evidencias') as $file) {
-                    $path = $file->store('evidencias/'.$reporte->dependencia_id, 'public');
+                    $path = $this->uploads->storeFile($file, $carpetaEvidencias);
                     $reporte->evidencias()->create([
                         'dependencia_id' => $reporte->dependencia_id,
-                        'url' => Storage::url($path),
+                        'url' => $this->uploads->url($path),
                         'tipo_archivo' => $file->getClientMimeType(),
                         'peso_kb' => (int) ($file->getSize() / 1024),
                         'subido_por' => $request->user()->id,
                     ]);
+                }
+            }
+
+            // Evidencias fotográficas en base64 o array de URLs/base64
+            $evidenciasInput = $request->input('evidenciaFotografica', $request->input('evidencias'));
+            if (is_array($evidenciasInput)) {
+                foreach ($evidenciasInput as $evi) {
+                    $valor = is_string($evi) ? $evi : ($evi['url'] ?? null);
+                    $valor = is_string($valor) ? trim($valor) : null;
+
+                    if ($valor === null || $valor === '') {
+                        continue;
+                    }
+
+                    $decoded = $this->uploads->decodeImageDataUri($valor);
+
+                    if ($decoded) {
+                        $path = $this->uploads->storeContents($decoded['contents'], $carpetaEvidencias, $decoded['extension']);
+                        $url = $this->uploads->url($path);
+                        $mime = $decoded['mime'];
+                        $pesoKb = (int) ceil(strlen($decoded['contents']) / 1024);
+                    } else {
+                        // Referencia ya almacenada (URL absoluta o ruta relativa)
+                        $url = str_starts_with($valor, 'http') ? $valor : $this->uploads->url($valor);
+                        $mime = is_array($evi) ? ($evi['tipoArchivo'] ?? $evi['tipo_archivo'] ?? null) : null;
+                        $pesoKb = 0;
+                    }
+
+                    $reporte->evidencias()->create([
+                        'dependencia_id' => $reporte->dependencia_id,
+                        'url' => $url,
+                        'tipo_archivo' => $mime,
+                        'peso_kb' => $pesoKb,
+                        'subido_por' => $request->user()->id,
+                    ]);
+                }
+            }
+
+            // Sincronización automática de estatus en Ticket o Servicio origen
+            $estatusNormalizado = strtolower((string) $reporte->estatus);
+            if (in_array($estatusNormalizado, ['finalizado', 'cerrado', 'cerrado / trabajo finalizado'])) {
+                if ($reporte->ticket_id) {
+                    \App\Models\Ticket::where('dependencia_id', $reporte->dependencia_id)
+                        ->where('id', $reporte->ticket_id)
+                        ->update(['estatus' => 'resuelto']);
+                }
+                if ($reporte->servicio_id) {
+                    \App\Models\Servicio::where('dependencia_id', $reporte->dependencia_id)
+                        ->where('id', $reporte->servicio_id)
+                        ->update(['estatus' => 'realizado']);
                 }
             }
 
@@ -182,6 +237,23 @@ class ReporteController extends Controller
         ]);
 
         $reporte->update($data);
+
+        // Sincronización automática de estatus en Ticket o Servicio origen al actualizar estatus
+        if (isset($data['estatus'])) {
+            $estatusNormalizado = strtolower((string) $data['estatus']);
+            if (in_array($estatusNormalizado, ['finalizado', 'cerrado', 'cerrado / trabajo finalizado'])) {
+                if ($reporte->ticket_id) {
+                    \App\Models\Ticket::where('dependencia_id', $reporte->dependencia_id)
+                        ->where('id', $reporte->ticket_id)
+                        ->update(['estatus' => 'resuelto']);
+                }
+                if ($reporte->servicio_id) {
+                    \App\Models\Servicio::where('dependencia_id', $reporte->dependencia_id)
+                        ->where('id', $reporte->servicio_id)
+                        ->update(['estatus' => 'realizado']);
+                }
+            }
+        }
 
         return response()->json($reporte->load(['ejecutores', 'materiales']));
     }

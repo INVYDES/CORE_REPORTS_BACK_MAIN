@@ -1,5 +1,4 @@
 <script setup lang="ts">
-// @ts-nocheck
     import { reactive, computed, ref, onMounted } from 'vue';
     import { useRouter } from 'vue-router'
     const router = useRouter()
@@ -14,20 +13,17 @@
         router.push({ name: 'dashboard' })
     }
 
-    import { getDependenciaName } from '../../../data/mockDependencias';
     import type { ReporteMaterial, EvidenciaFotografica } from '../../../data/mockReportes';
         import { ticketsApi } from '../../../api/tickets';
     import { serviciosApi } from '../../../api/servicios';
     import { areasApi } from '../../../api/areas';
     import client from '../../../api/client';
     import { useToast } from 'vue-toastification';
-    import { Image as ImageIcon, Upload, X as XIcon, Camera } from 'lucide-vue-next'
+    import { Image as ImageIcon, Upload, Camera } from 'lucide-vue-next'
     const toast = useToast();
 
     const props = defineProps<{ isModal?: boolean }>()
     const emit = defineEmits<{ (e: 'close'): void; (e: 'created'): void }>()
-    import { mockSubdependencias as fallbackAreas } from '../../../data/mockDependencias';
-    import { mockUsers as fallbackUsers } from '../../../data/mockUsers';
     
     const formData = reactive(
         {
@@ -55,35 +51,32 @@
     )
 
     const dependencyName = computed(() =>
-        (currentUser.value as any)?.dependencia?.nombre || getDependenciaName((currentUser.value as any).idDependencia ?? (currentUser.value as any).dependencia_id)
+        (currentUser.value as any)?.dependencia?.nombre || 'Empresa'
     )
 
     const realAreas = ref<any[]>([])
-    const availableSubareas = computed(() => {
-        if (realAreas.value.length) return realAreas.value
-        return fallbackAreas.filter((s: any) => s.idDependencia === ((currentUser.value as any).idDependencia ?? (currentUser.value as any).dependencia_id) && s.activo)
-    })
+    const availableSubareas = computed(() => realAreas.value)
     onMounted(async ()=>{
         try {
             const res = await areasApi.list()
             const list = res.data || res
             realAreas.value = (Array.isArray(list) ? list : []).map((a:any)=> ({ idSubdependencia: a.id, idDependencia: a.dependencia_id, nombre: a.nombre, activo: a.activa }))
-        } catch {}
+        } catch { /* no-op */ }
         try {
             const t = await ticketsApi.list({ per_page: 100 })
             const list = t.data || t
             availableTicketsReal.value = Array.isArray(list) ? list : []
-        } catch {}
+        } catch { /* no-op */ }
         try {
             const s = await serviciosApi.list({ per_page: 100 })
             const list = s.data || s
             availableServicesReal.value = Array.isArray(list) ? list : []
-        } catch {}
+        } catch { /* no-op */ }
         try {
-            const u = await client.get('/usuarios', { params:{ per_page:100 } }).then(r=>r.data)
+            const u = await client.get('/tecnicos').then(r=>r.data)
             const list = u.data || u
             availableTechniciansReal.value = Array.isArray(list) ? list.filter((x:any)=> [1,3].includes(x.rol)) : []
-        } catch {}
+        } catch { /* no-op */ }
     })
 
     const availableTicketsReal = ref<any[]>([])
@@ -112,15 +105,12 @@
         3: 'Técnico'
     }
 
-    const availableTechnicians = computed(() => {
-        if (availableTechniciansReal.value.length) return availableTechniciansReal.value.map((u:any)=> ({ ...u, idUsuario: u.id, idDependencia: u.dependencia_id, nombre: u.nombre, apellidos: u.apellidos, rol: u.rol, numeroEmpleado: u.numero_empleado }))
-        return fallbackUsers.filter((u: any) => u.idDependencia === ((currentUser.value as any).idDependencia ?? (currentUser.value as any).dependencia_id) && (u.rol === 3 || u.rol === 1))
-    })
+    const availableTechnicians = computed(() =>
+        availableTechniciansReal.value.map((u:any)=> ({ ...u, idUsuario: u.id, idDependencia: u.dependencia_id, nombre: u.nombre, apellidos: u.apellidos, rol: u.rol, numeroEmpleado: u.numeroEmpleado ?? u.numero_empleado }))
+    )
 
     const getEjecutorData = (id:number) => {
-        const real = availableTechnicians.value.find((u: any) => (u.idUsuario||u.id) === id)
-        if (real) return real
-        return fallbackUsers.find((u: any) => u.idUsuario === id)
+        return availableTechnicians.value.find((u: any) => (u.idUsuario||u.id) === id) || null
     }
 
     const totalHorasCalculadas = computed(() =>

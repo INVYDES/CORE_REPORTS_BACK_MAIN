@@ -7,4 +7,7 @@ parameters:
         - database
     excludePaths:
         - vendor
-    checkMissingIterableValueType: false
+    # En PHPStan 2.x la antigua opción checkMissingIterableValueType se sustituye
+    # por ignorar el identificador missingType.iterableValue.
+    ignoreErrors:
+        - identifier: missingType.iterableValue
