@@ -12,7 +12,7 @@ if (lrId && lrId.trim() !== '' && lrId !== 'your-company/your-app' && lrId.inclu
     }
   }, true)
   import('logrocket').then(({ default: LogRocket }) => {
-    try { LogRocket.init(lrId) } catch {}
+    try { LogRocket.init(lrId) } catch { /* LogRocket es opcional */ }
   }).catch(() => {})
 }
 import VueApexCharts from 'vue3-apexcharts'

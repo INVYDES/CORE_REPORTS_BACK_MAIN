@@ -1,8 +1,25 @@
 <IfModule mod_rewrite.c>
   RewriteEngine On
-  RewriteBase /core-reports/
+  RewriteBase /
+
+  # API: todo /api/* entra por api/index.php (Laravel vive fuera del docroot).
+  # El !-f evita el bucle al reescribir api/index.php sobre sí mismo.
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteRule ^api/(.*)$ api/index.php [L]
+
+  # SPA fallback (Vue Router en history mode).
+  # La sustitución es relativa a propósito: funciona igual si el sitio se sirve
+  # en la raíz de creports.corion.mx o dentro de un subdirectorio.
   RewriteRule ^index\.html$ - [L]
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
-  RewriteRule . /core-reports/index.html [L]
+  RewriteRule . index.html [L]
+</IfModule>
+
+# No cachear el index.html: siempre debe referenciar los chunks con hash del
+# último build (los assets sí pueden cachearse).
+<IfModule mod_headers.c>
+  <FilesMatch "index\.html$">
+    Header set Cache-Control "no-store, must-revalidate"
+  </FilesMatch>
 </IfModule>

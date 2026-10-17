@@ -5,11 +5,13 @@ import { useAuthStore } from '../../stores/authStore'
 import { storeToRefs } from 'pinia'
 import client from '../../api/client'
 import { useToast } from 'vue-toastification'
+import { Eye, EyeOff } from 'lucide-vue-next'
 
 const router = useRouter()
 const authStore = useAuthStore()
 const { currentUser } = storeToRefs(authStore)
 const toast = useToast()
+const showPassword = ref(false)
 
 onMounted(() => {
     if (!currentUser.value || (currentUser.value as any).rol !== 2) {
@@ -69,7 +71,18 @@ const completeOnboarding = async () => {
                     </div>
                     <div class="input-group">
                         <label>Contraseña *</label>
-                        <input type="password" v-model="adminTecnico.password" placeholder="••••••••" required />
+                        <div class="password-wrap">
+                            <input v-model="adminTecnico.password" :type="showPassword ? 'text' : 'password'" placeholder="••••••••" required />
+                            <button
+                                type="button"
+                                class="password-toggle"
+                                :aria-label="showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'"
+                                @click="showPassword = !showPassword"
+                            >
+                                <EyeOff v-if="showPassword" :size="18" />
+                                <Eye v-else :size="18" />
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -213,6 +226,35 @@ input:focus {
     outline: none;
     border-color: #3b82f6;
     box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+/* Mostrar/ocultar contraseña */
+.password-wrap {
+    position: relative;
+}
+
+.password-wrap input {
+    width: 100%;
+    padding-right: 2.6rem;
+}
+
+.password-toggle {
+    position: absolute;
+    right: 0.6rem;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #64748b;
+}
+
+.password-toggle:hover {
+    color: #3b82f6;
 }
 
 .technicians-list {

@@ -2,16 +2,30 @@ import { createRouter, createWebHistory } from 'vue-router'
 import AuthLayout from '../layouts/AuthLayout.vue'
 import AppLayout from '../layouts/AppLayout.vue'
 import { useAuthStore } from '../stores/authStore'
+import { appBase } from '../utils/basePath'
 
 const router = createRouter({
-    history: createWebHistory(import.meta.env.BASE_URL),
+    history: createWebHistory(appBase),
+    // Al navegar: respeta atrás/adelante y hace scroll suave a los anclas (#precios, etc.).
+    scrollBehavior(to, _from, savedPosition) {
+        if (savedPosition) return savedPosition
+        if (to.hash) return { el: to.hash, top: 80, behavior: 'smooth' }
+        return { top: 0 }
+    },
     routes: [
+        // Landing pública (home). Visible para todos, con o sin sesión.
+        {
+            path: '/',
+            name: 'landing',
+            component: () => import('../views/LandingView.vue')
+        },
+
         {
             path: '/',
             component: AuthLayout,
             children: [
                 {
-                    path: '',
+                    path: 'login',
                     name: 'login',
                     component: () => import('../views/auth/LoginView.vue'),
                     meta: { guestOnly: true }
@@ -54,10 +68,31 @@ const router = createRouter({
             component: () => import('../views/licencias/PendienteView.vue')
         },
 
-        // Cualquier ruta no definida → login
+        // Páginas legales públicas
+        {
+            path: '/aviso-de-privacidad',
+            name: 'privacy',
+            component: () => import('../views/LegalView.vue'),
+            meta: { legal: 'privacy' }
+        },
+        {
+            path: '/terminos',
+            name: 'terms',
+            component: () => import('../views/LegalView.vue'),
+            meta: { legal: 'terms' }
+        },
+        {
+            path: '/aviso-legal',
+            name: 'legal-notice',
+            component: () => import('../views/LegalView.vue'),
+            meta: { legal: 'legal-notice' }
+        },
+
+        // Cualquier ruta no definida → 404 personalizada
         {
             path: '/:pathMatch(.*)*',
-            redirect: { name: 'login' }
+            name: 'not-found',
+            component: () => import('../views/NotFoundView.vue')
         },
 
         {
@@ -74,13 +109,15 @@ const router = createRouter({
                 {
                     path: 'history',
                     name: 'history',
-                    component: () => import('../views/admin/HistoryView.vue')
+                    component: () => import('../views/admin/HistoryView.vue'),
+                    meta: { allowedRoles: [1, 3] }
                 },
 
                 {
                     path: 'company-profile',
                     name: 'company-profile',
-                    component: () => import('../views/admin/CompanyProfileView.vue')
+                    component: () => import('../views/admin/CompanyProfileView.vue'),
+                    meta: { allowedRoles: [2] }
                 },
 
                 {
@@ -101,7 +138,7 @@ const router = createRouter({
                     path: 'reports/:id',
                     name: 'report-detail',
                     component: () => import('../views/admin/reports/ReportDetailView.vue'),
-                    meta: { allowedRoles: [1, 3] }
+                    meta: { allowedRoles: [1, 2, 3] }
                 },
 
                 {
@@ -138,7 +175,8 @@ const router = createRouter({
                 {
                     path: 'analysis',
                     name: 'analysis',
-                    component: () => import('../views/admin/AnalysisView.vue')
+                    component: () => import('../views/admin/AnalysisView.vue'),
+                    meta: { allowedRoles: [1, 2] }
                 },
 
                 {

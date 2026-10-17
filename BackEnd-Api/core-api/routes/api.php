@@ -39,7 +39,7 @@ Route::prefix('v1')->group(function () {
     Route::get('/licencias/disponibles', [LicenciaController::class, 'disponibles']);
 
     // API autenticada
-    Route::middleware(['auth:sanctum', 'dependencia', 'licencia', 'singleDevice'])->group(function () {
+    Route::middleware(['auth:sanctum', 'dependencia', 'licencia'])->group(function () {
         Route::get('/me', [AuthController::class, 'me']);
         Route::post('/logout', [AuthController::class, 'logout']);
 
@@ -102,7 +102,7 @@ Route::middleware('throttle:auth')->group(function () {
 Route::middleware('throttle:registro')->group(function () {
     Route::post('/public/register-compania', [AuthController::class, 'registerCompania']);
 });
-Route::middleware(['auth:sanctum', 'dependencia', 'licencia', 'singleDevice'])->group(function () {
+Route::middleware(['auth:sanctum', 'dependencia', 'licencia'])->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('history', [HistoryController::class, 'index']);

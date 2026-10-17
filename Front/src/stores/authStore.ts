@@ -62,7 +62,8 @@ export const useAuthStore = defineStore('auth', () => {
         setTokenHeader(tkn);
         // Set JWT cookie for edge workers detection (Secure, SameSite=Strict)
         try {
-          document.cookie = `jwt=${tkn}; Path=/; Secure; SameSite=Strict`;
+          const secure = window.location.protocol === 'https:' ? '; Secure' : ''
+          document.cookie = `jwt=${tkn}; Path=/; SameSite=Strict${secure}`;
         } catch (e) {
           console.warn('Unable to set JWT cookie', e);
         }
@@ -88,14 +89,15 @@ export const useAuthStore = defineStore('auth', () => {
     };
 
     const logout = async () => {
-        try { if (token.value) await client.post('/logout'); } catch {}
+        try { if (token.value) await client.post('/logout'); } catch { /* el token ya no es válido */ }
         token.value = null;
         currentUser.value = null;
         clearSession();
         delete client.defaults.headers.common['Authorization'];
         // Remove JWT cookie
         try {
-          document.cookie = 'jwt=; Path=/; Max-Age=0; Secure; SameSite=Strict';
+          const secure = window.location.protocol === 'https:' ? '; Secure' : ''
+          document.cookie = `jwt=; Path=/; Max-Age=0; SameSite=Strict${secure}`;
         } catch (e) {
           console.warn('Unable to delete JWT cookie', e);
         }

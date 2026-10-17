@@ -16,11 +16,6 @@ import client from '../../../api/client'
     const route = useRoute()
     const router = useRouter()
 
-    // Role-based access: only tech roles (1: Admin Técnico, 3: Técnico) can view reports
-    if (!currentUser.value || (currentUser.value?.rol !== 1 && currentUser.value?.rol !== 3)) {
-        router.push({ name: 'dashboard' })
-    }
-
     const goBack = () => {
         router.back()
     }

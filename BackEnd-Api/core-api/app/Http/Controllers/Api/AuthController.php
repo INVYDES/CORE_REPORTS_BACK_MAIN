@@ -20,7 +20,9 @@ class AuthController extends Controller
 
         $user = Usuario::where('email', $credentials['email'])->first();
 
-        if (! $user || (! Hash::check($credentials['password'], $user->password) && $user->email !== 'admin.tec@core.com')) {
+        // Mensaje genérico: no revelar si el correo existe (enumeración de usuarios).
+        // Toda cuenta, sin excepción, debe validar su contraseña con Hash::check.
+        if (! $user || ! Hash::check($credentials['password'], $user->password)) {
             return response()->json([
                 'message' => 'Credenciales incorrectas. Verifica tu correo y contraseña.',
                 'errors' => [
@@ -29,22 +31,19 @@ class AuthController extends Controller
             ], 401);
         }
 
-        // Generar y registrar un identificador único de dispositivo
-        $deviceId = (string) Str::uuid();
-        $user->current_device = $deviceId;
-        $user->save();
-
         if (! $user->estado) {
             // 403 genérico sin revelar más detalles de la cuenta
             return response()->json(['message' => 'Cuenta desactivada. Contacta al administrador.'], 403);
         }
 
+        // Identificador del dispositivo que inicia sesión (informativo).
+        $deviceId = (string) Str::uuid();
+        $user->current_device = $deviceId;
         $user->forceFill(['ultimo_acceso' => now()])->save();
 
-        // Revocar tokens anteriores: una sesión activa por usuario
-        $user->tokens()->delete();
-
-        $token = $user->createToken($user->current_device)->plainTextToken;
+        // Sesiones simultáneas permitidas: no se revocan los tokens previos.
+        // Cada login emite su propio token y el logout solo borra el actual.
+        $token = $user->createToken($deviceId)->plainTextToken;
 
         return response()->json([
             'user' => $user->load('dependencia'),

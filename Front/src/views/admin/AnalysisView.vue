@@ -268,9 +268,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, watchEffect, ref, onMounted, onUnmounted, watch } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { Clock, ArrowRight, BarChart2, Activity } from 'lucide-vue-next'
-import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/authStore'
 import client from '../../api/client'
 import { mockReportes, type Reporte } from '../../data/mockReportes'
@@ -280,8 +279,7 @@ import { mockUsers, type Usuario } from '../../data/mockUsers'
 import { mockEncuestas } from '../../data/mockEncuestas'
 import html2pdf from 'html2pdf.js'
 
-// Initialize router and auth
-const router = useRouter()
+// Initialize auth
 const authStore = useAuthStore()
 const currentUser = computed(() => authStore.currentUser)
 
@@ -298,14 +296,6 @@ const exportPDF = () => {
     };
     html2pdf().set(opt).from(dashboardContent.value).save();
 }
-
-// 1. Security Redirect - espera a que cargue currentUser
-watchEffect(() => {
-    if (!currentUser.value) return
-    if (currentUser.value?.rol !== 1 && currentUser.value?.rol !== 2) {
-        router.push({ name: 'dashboard' })
-    }
-})
 
 // Safe fallback for idDependencia during initial load/redirect
 const myCompanyId = computed(() => (currentUser.value as any)?.dependencia_id ?? (currentUser.value as any)?.idDependencia ?? -1)

@@ -1,0 +1,13 @@
+User-agent: *
+Allow: /$
+Allow: /aviso-de-privacidad
+Allow: /terminos
+Allow: /aviso-legal
+Disallow: /app/
+Disallow: /login
+Disallow: /register
+Disallow: /onboarding
+Disallow: /licencias/
+Disallow: /new-ticket
+
+Sitemap: https://creports.corion.mx/sitemap.xml

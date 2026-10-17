@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/authStore'
 import { useToast } from 'vue-toastification'
+import { Eye, EyeOff } from 'lucide-vue-next'
 import loginImageUrl from '../../assets/login-image.png'
 
 const router = useRouter()
@@ -11,6 +12,7 @@ const toast = useToast()
 
 const email = ref('')
 const password = ref('')
+const showPassword = ref(false)
 const rememberMe = ref(false)
 const isLoading = ref(false)
 const errorMsg = ref('')
@@ -26,7 +28,9 @@ const handleLogin = async () => {
     // disparar un 401->auth:expirado y revertir el redirect.
     const redirect = router.currentRoute.value.query.redirect as string | undefined
     const dest = redirect && redirect.startsWith('/') && !redirect.startsWith('/login') ? redirect : '/app/dashboard'
-    router.push(dest)
+    // Navegación completa (no router.push): así la SPA arranca limpia con la
+    // sesión ya persistida y el dashboard no queda en blanco tras el login.
+    window.location.assign(router.resolve(dest).href)
   } catch (e: any) {
     const status = e?.response?.status
     if (status === 419) {
@@ -35,8 +39,13 @@ const handleLogin = async () => {
       errorMsg.value = e?.response?.data?.errors?.email?.[0] || e?.response?.data?.message || 'Credenciales incorrectas. Verifica tu correo y contraseña.'
     } else if (status === 403) {
       errorMsg.value = e?.response?.data?.message || 'Usuario desactivado. Contacta al administrador.'
+    } else if (status === 429) {
+      const retry = e?.response?.headers?.['retry-after']
+      errorMsg.value = retry
+        ? `Demasiados intentos. Espera ${retry} segundos e intenta de nuevo.`
+        : 'Demasiados intentos de acceso. Espera un minuto e intenta de nuevo.'
     } else {
-      errorMsg.value = e?.response?.data?.message || 'Error de conexión. Verifica que la API esté en http://localhost:8000'
+      errorMsg.value = e?.response?.data?.message || 'No se pudo conectar con el servidor. Intenta de nuevo.'
     }
     if (errorMsg.value.includes('CSRF token mismatch')) {
       errorMsg.value = 'Sesión expirada (CSRF). Recarga la página e intenta de nuevo.'
@@ -79,12 +88,23 @@ const handleLogin = async () => {
 
             <div class="form-group">
                 <label>Contraseña</label>
-                <input 
-                v-model="password" 
-                type="password" 
-                placeholder="••••••••" 
-                required 
-                />
+                <div class="password-wrap">
+                    <input
+                    v-model="password"
+                    :type="showPassword ? 'text' : 'password'"
+                    placeholder="••••••••"
+                    required
+                    />
+                    <button
+                        type="button"
+                        class="password-toggle"
+                        :aria-label="showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'"
+                        @click="showPassword = !showPassword"
+                    >
+                        <EyeOff v-if="showPassword" :size="18" />
+                        <Eye v-else :size="18" />
+                    </button>
+                </div>
             </div>
 
             <div class="form-actions">
@@ -205,7 +225,8 @@ label {
 }
 
 input[type="email"],
-input[type="password"] {
+input[type="password"],
+input[type="text"] {
     width: 100%;
     padding: 0.75rem 1rem;
     border: 1px solid #d1d5db;
@@ -219,6 +240,34 @@ input:focus {
     border-color: #1e3a8a;
     box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.1);
     outline: none;
+}
+
+/* --------- MOSTRAR/OCULTAR CONTRASEÑA --------- */
+.password-wrap {
+    position: relative;
+}
+
+.password-wrap input {
+    padding-right: 2.6rem;
+}
+
+.password-toggle {
+    position: absolute;
+    right: 0.6rem;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #6b7280;
+}
+
+.password-toggle:hover {
+    color: #1e3a8a;
 }
 
 /* ------------ ACTIONS --------- */

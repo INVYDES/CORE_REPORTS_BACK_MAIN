@@ -3,10 +3,12 @@ import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import client from '../../api/client'
 import { useToast } from 'vue-toastification'
+import { Eye, EyeOff } from 'lucide-vue-next'
 
 const router = useRouter()
 const toast = useToast()
 const isLoading = ref(false)
+const showPassword = ref(false)
 
 const fiscalRegimes = [
     { code: '601', label: '601 - General de Ley Personas Morales' },
@@ -147,7 +149,7 @@ const pagarConMercadoPago = async () => {
                         <div class="form-group half">
                             <label>Uso CFDI *</label>
                             <select v-model="formData.cfdiUse" required>
-                            <option value=""disabled>
+                            <option value="" disabled>
                                 Seleccione...
                             </option>
                             <option v-for="use in cfdiUses" :key="use.code" :value="use.code">
@@ -208,12 +210,23 @@ const pagarConMercadoPago = async () => {
                         <!-- Contraseña -->
                         <div class="form-group">
                             <label>Contraseña *</label>
-                            <input
-                                v-model="formData.password"
-                                type="password"
-                                required
-                                placeholder="••••••••"
-                            />
+                            <div class="password-wrap">
+                                <input
+                                    v-model="formData.password"
+                                    :type="showPassword ? 'text' : 'password'"
+                                    required
+                                    placeholder="••••••••"
+                                />
+                                <button
+                                    type="button"
+                                    class="password-toggle"
+                                    :aria-label="showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'"
+                                    @click="showPassword = !showPassword"
+                                >
+                                    <EyeOff v-if="showPassword" :size="18" />
+                                    <Eye v-else :size="18" />
+                                </button>
+                            </div>
                         </div>
 
                         <!--Nombre del administrador-->
@@ -570,6 +583,35 @@ $border-color: #d1d5db;
             outline: none;
         }
     }
+}
+
+// Mostrar/ocultar contraseña
+.password-wrap {
+    position: relative;
+}
+
+.password-wrap input {
+    width: 100%;
+    padding-right: 2.6rem;
+}
+
+.password-toggle {
+    position: absolute;
+    right: 0.6rem;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #6b7280;
+}
+
+.password-toggle:hover {
+    color: $dark-blue;
 }
 
 // Checkbox input

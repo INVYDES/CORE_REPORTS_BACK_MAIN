@@ -1,7 +1,12 @@
 import axios from 'axios'
 import { getToken, clearSession } from './session'
+import { appBase } from '../utils/basePath'
 
-const rawBase = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
+// VITE_API_URL manda si está definida (build de Cloudflare/Cloud Run).
+// Si no, la API se asume junto al front en la misma base, así el build sirve
+// igual en la raíz del subdominio que en un subdirectorio.
+const rawBase = import.meta.env.VITE_API_URL
+  || (import.meta.env.DEV ? 'http://localhost:8000/api' : `${appBase}api`)
 const baseURL = rawBase.endsWith('/v1') ? rawBase : rawBase.replace(/\/$/, '') + '/v1'
 const client = axios.create({
   baseURL,

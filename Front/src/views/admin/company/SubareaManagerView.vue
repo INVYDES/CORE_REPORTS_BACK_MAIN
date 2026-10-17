@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../../stores/authStore'
 import { storeToRefs } from 'pinia'
 import { areasApi } from '../../../api/areas'
@@ -13,13 +12,8 @@ import {
     Map
 } from 'lucide-vue-next'
 
-const router = useRouter()
 const authStore = useAuthStore()
 const { currentUser } = storeToRefs(authStore)
-
-if (!currentUser.value || (currentUser.value?.rol !== 1 && currentUser.value?.rol !== 2)) {
-    router.push({ name: 'dashboard' })
-}
 
 /** Subárea operativa de la empresa: recurso `areas` del backend. */
 interface AreaOperativa {

@@ -9,10 +9,6 @@
     const authStore = useAuthStore();
     const { currentUser } = storeToRefs(authStore);
 
-    if (!currentUser.value || (currentUser.value?.rol !== 1 && currentUser.value?.rol !== 3)) {
-        router.push({ name: 'dashboard' })
-    }
-
     import type { ReporteMaterial, EvidenciaFotografica } from '../../../data/mockReportes';
         import { ticketsApi } from '../../../api/tickets';
     import { serviciosApi } from '../../../api/servicios';

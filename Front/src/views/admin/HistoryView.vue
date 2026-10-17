@@ -19,10 +19,6 @@ const router = useRouter()
 const authStore = useAuthStore()
 const { currentUser } = storeToRefs(authStore)
 
-if (!currentUser.value || (currentUser.value?.rol !== 1 && currentUser.value?.rol !== 3)) {
-    router.replace({ name: 'dashboard' })
-}
-
 const idDep = (currentUser.value as any)?.idDependencia ?? (currentUser.value as any)?.dependencia_id
 const rawTickets = ref<any[]>([])
 const rawServices = ref<any[]>([])

@@ -24,11 +24,18 @@ const i18n = createI18n({
   messages: { es, en },
 })
 
-/** Cambia el idioma y persiste la preferencia. */
+try {
+  document.documentElement.lang = i18n.global.locale.value
+} catch {
+  /* no-op */
+}
+
+/** Cambia el idioma, persiste la preferencia y actualiza <html lang> (SEO). */
 export function cambiarIdioma(idioma: MensajesIdioma): void {
   i18n.global.locale.value = idioma
   try {
     localStorage.setItem(LS_KEY, idioma)
+    document.documentElement.lang = idioma
   } catch {
     /* no-op */
   }

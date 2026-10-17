@@ -5,6 +5,13 @@
  * añadirse después (workbox) si se requiere modo offline completo.
  */
 
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
+// Icono con nombre estable (los del bundle llevan hash) para que el manifest
+// funcione igual en la raíz del dominio que en un subdirectorio.
+const ICON_SOURCE = fileURLToPath(new URL('../icon-core.svg', import.meta.url))
+
 
 interface OpcionesManifest {
   nombre?: string
@@ -27,13 +34,13 @@ export function VueWebManifestPlugin(opciones: OpcionesManifest = {}) {
     name: nombre,
     short_name: nombreCorto,
     description: descripcion,
-    start_url: '/',
+    start_url: './',
     display: 'standalone',
     background_color: colorFondo,
     theme_color: colorTema,
     lang: 'es',
     icons: [
-      { src: '/icon-core.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+      { src: './icon-core.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
     ],
   }
 
@@ -56,6 +63,11 @@ export function VueWebManifestPlugin(opciones: OpcionesManifest = {}) {
         type: 'asset',
         fileName: MANIFEST_PATH,
         source: JSON.stringify(manifest, null, 2),
+      })
+      this.emitFile({
+        type: 'asset',
+        fileName: 'icon-core.svg',
+        source: readFileSync(ICON_SOURCE),
       })
     },
   }

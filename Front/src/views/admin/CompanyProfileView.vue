@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/authStore'
 import { storeToRefs } from 'pinia'
 import client from '../../api/client'
@@ -13,18 +12,14 @@ import {
     Users, 
     Settings,
     Save,
-    CreditCard
+    CreditCard,
+    Eye,
+    EyeOff
 } from 'lucide-vue-next'
 
-const router = useRouter()
 const authStore = useAuthStore()
 const { currentUser } = storeToRefs(authStore)
 const toast = useToast()
-
-// 1. Security & Access Control
-if (!currentUser.value || currentUser.value?.rol !== 2) {
-    router.push({ name: 'dashboard' })
-}
 
 const planLabel = (code: string) => ({ trial: 'Trial', mensual: 'Mensual', anual: 'Anual' } as any)[code] || code || '—'
 const tierLabel = (limit: number) => {
@@ -194,6 +189,7 @@ const getRoleText = (rol: number) => {
 // User Modal State
 const isUserModalOpen = ref(false)
 const isEditing = ref(false)
+const showPassword = ref(false)
 const userForm = ref({
     idUsuario: 0,
     nombre: '',
@@ -215,6 +211,7 @@ const openModalForAdd = () => {
         password: ''
     }
     isEditing.value = false
+    showPassword.value = false
     isUserModalOpen.value = true
 }
 
@@ -229,6 +226,7 @@ const openModalForEdit = (user: any) => {
         password: '' // Don't populate password
     }
     isEditing.value = true
+    showPassword.value = false
     isUserModalOpen.value = true
 }
 
@@ -547,7 +545,18 @@ onMounted(() => { loadCompany(); loadUsers() })
 
                         <div class="form-group">
                             <label>Contraseña</label>
-                            <input type="password" v-model="userForm.password" class="editable-input" placeholder="••••••••" />
+                            <div class="password-wrap">
+                                <input v-model="userForm.password" :type="showPassword ? 'text' : 'password'" class="editable-input" placeholder="••••••••" />
+                                <button
+                                    type="button"
+                                    class="password-toggle"
+                                    :aria-label="showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'"
+                                    @click="showPassword = !showPassword"
+                                >
+                                    <EyeOff v-if="showPassword" :size="18" />
+                                    <Eye v-else :size="18" />
+                                </button>
+                            </div>
                             <p v-if="isEditing" class="text-xs text-slate-500 mt-1">Dejar en blanco para mantener la contraseña actual.</p>
                         </div>
                     </div>
@@ -665,6 +674,34 @@ onMounted(() => { loadCompany(); loadUsers() })
 .editable-input:focus {
     border-color: #3b82f6;
     box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+/* Mostrar/ocultar contraseña */
+.password-wrap {
+    position: relative;
+}
+
+.password-wrap input {
+    padding-right: 2.6rem;
+}
+
+.password-toggle {
+    position: absolute;
+    right: 0.6rem;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #64748b;
+}
+
+.password-toggle:hover {
+    color: #3b82f6;
 }
 
 /* SECTION A: Company Layout */

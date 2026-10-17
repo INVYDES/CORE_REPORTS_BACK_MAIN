@@ -1,5 +1,5 @@
 <script setup lang="ts">
-    import { computed } from 'vue'
+    import { computed, watch } from 'vue'
     import { useRoute, useRouter } from 'vue-router'
     import { useAuthStore } from '../../stores/authStore'
     import { storeToRefs } from 'pinia'
@@ -46,6 +46,23 @@
     }>()
     
     const emit = defineEmits(['close', 'openReportModal', 'openTicketModal'])
+
+    // En móvil/tablet los router-link no emiten close: si el menú queda abierto
+    // tapa la nueva página y parece que "no cambia". Se cierra en cada navegación.
+    watch(() => route.fullPath, () => emit('close'))
+
+    // Páginas de detalle: resaltar el ítem padre del menú (ej. ticket → Tickets).
+    const parentRouteFor: Record<string, string> = {
+        'ticket-detail': 'tickets',
+        'report-detail': 'reports',
+        'report-survey': 'reports',
+        'service-detail': 'schedule-list',
+    }
+    const isActive = (item: { path: string }) => {
+        const name = route.name ? String(route.name) : ''
+        const current = parentRouteFor[name] ?? name
+        return current === item.path
+    }
     
     const menuItems = computed(() => {
         const items = [
@@ -153,11 +170,11 @@
         <nav class = "sidebar-nav">
 
             <template v-for="item in menuItems" :key="item.path">
-                <button v-if="item.path === 'reports-new'" class="nav-item" @click="emit('openReportModal'); emit('close')">
+                <button v-if="item.path === 'reports-new'" class="nav-item" :class="{ 'active': isActive(item) }" @click="emit('openReportModal'); emit('close')">
                     <component :is="item.icon" :size="20" />
                     <span>{{ item.label }}</span>
                 </button>
-                <button v-else-if="item.path === 'create-ticket'" class="nav-item" @click="emit('openTicketModal'); emit('close')">
+                <button v-else-if="item.path === 'create-ticket'" class="nav-item" :class="{ 'active': isActive(item) }" @click="emit('openTicketModal'); emit('close')">
                     <component :is="item.icon" :size="20" />
                     <span>{{ item.label }}</span>
                 </button>
@@ -165,7 +182,7 @@
                     :to = "{ name: item.path }"
                     :target="item.target"
                     class = "nav-item"
-                    :class = "{ 'active' : route.name === item.path }"
+                    :class = "{ 'active' : isActive(item) }"
                 >
                     <component 
                         :is = "item.icon"
