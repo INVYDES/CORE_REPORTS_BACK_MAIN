@@ -75,25 +75,16 @@ export const useAuthStore = defineStore('auth', () => {
         return data.user as UsuarioReal;
     };
 
-    const fetchMe = async () => {
-        if (!token.value) return null;
-        try {
-            const { data } = await client.get('/me');
-            currentUser.value = data;
-            setSession(token.value, data);
-            return data;
-        } catch {
-            await logout();
-            return null;
-        }
-    };
-
-    const logout = async () => {
-        try { if (token.value) await client.post('/logout'); } catch { /* el token ya no es válido */ }
+    /**
+     * Limpia el estado local de sesión (token, usuario, storage, header y cookie)
+     * sin llamar a la API. Necesario para que el guard de rutas no siga viendo la
+     * sesión como activa cuando el token ya expiró (401).
+     */
+    const clearAuth = () => {
         token.value = null;
         currentUser.value = null;
         clearSession();
-        delete client.defaults.headers.common['Authorization'];
+        setTokenHeader(null);
         // Remove JWT cookie
         try {
           const secure = window.location.protocol === 'https:' ? '; Secure' : ''
@@ -103,6 +94,24 @@ export const useAuthStore = defineStore('auth', () => {
         }
     };
 
+    const fetchMe = async () => {
+        if (!token.value) return null;
+        try {
+            const { data } = await client.get('/me');
+            currentUser.value = data;
+            setSession(token.value, data);
+            return data;
+        } catch {
+            clearAuth();
+            return null;
+        }
+    };
+
+    const logout = async () => {
+        try { if (token.value) await client.post('/logout'); } catch { /* el token ya no es válido */ }
+        clearAuth();
+    };
+
     const changeUser = (_idUsuario: number) => {
         console.warn('changeUser legacy no-op, use login con otro email');
     };
@@ -110,7 +119,7 @@ export const useAuthStore = defineStore('auth', () => {
     return {
         token, currentUser, currentUserCompat, isAuthenticated,
         hasRole, isAdmin, isTecnico, isCliente,
-        login, logout, fetchMe, changeUser,
+        login, logout, fetchMe, changeUser, applySession, clearAuth,
         get currentUserValue() { return currentUserCompat.value; }
     };
 });

@@ -2,6 +2,7 @@
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import client from '../../api/client'
+import { useAuthStore } from '../../stores/authStore'
 import { useToast } from 'vue-toastification'
 import { Eye, EyeOff } from 'lucide-vue-next'
 
@@ -49,17 +50,9 @@ const handleRegister = async () => {
             phone: formData.phone,
             planType: formData.planType,
         })
-        // Guardar token y loguear automáticamente
+        // Guardar la sesión (sessionStorage + header) y entrar a la app
         if (data.token && data.user) {
-            localStorage.setItem('token', data.token)
-            localStorage.setItem('user', JSON.stringify(data.user))
-            // @ts-ignore
-            const { useAuthStore } = await import('../../stores/authStore')
-            const auth = useAuthStore()
-            // @ts-ignore
-            auth.token = data.token
-            // @ts-ignore
-            auth.currentUser = data.user
+            useAuthStore().applySession(data.user, data.token)
         }
         // Si eligió trial o no eligió plan, ir directo al dashboard
         if (!formData.planType || formData.planType === 'free' || formData.planType === 'trial') {

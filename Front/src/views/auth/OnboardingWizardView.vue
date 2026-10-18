@@ -20,22 +20,42 @@ onMounted(() => {
 })
 const adminTecnico = ref({ nombre: '', apellidos: '', correo: '', password: '' })
 const tecnicos = ref([{ nombre: '', apellidos: '', correo: '', numeroEmpleado: '' }])
+const created = ref<{ email: string; password: string; rol: string }[]>([])
+const finished = ref(false)
 const addTecnico = () => { tecnicos.value.push({ nombre: '', apellidos: '', correo: '', numeroEmpleado: '' }) }
 const removeTecnico = (index: number) => { if (tecnicos.value.length > 1) tecnicos.value.splice(index, 1) }
+
+/** Contraseña aleatoria (12 chars, sin caracteres ambiguos). */
+const generarPassword = () => {
+    const charset = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789'
+    const bytes = crypto.getRandomValues(new Uint8Array(12))
+    return Array.from(bytes, (b) => charset[b % charset.length]).join('')
+}
+
 const completeOnboarding = async () => {
-    if (!adminTecnico.value.nombre || !adminTecnico.value.correo) {
-        toast.error('El Administrador Técnico requiere al menos nombre y correo.')
+    if (!adminTecnico.value.nombre || !adminTecnico.value.correo || !adminTecnico.value.password) {
+        toast.error('El Administrador Técnico requiere nombre, correo y contraseña.')
+        return
+    }
+    if (adminTecnico.value.password.length < 8) {
+        toast.error('La contraseña debe tener al menos 8 caracteres.')
+        return
+    }
+    const pendientes = tecnicos.value.filter((t) => t.nombre || t.correo)
+    if (pendientes.some((t) => !t.nombre || !t.correo)) {
+        toast.error('Cada técnico requiere nombre y correo.')
         return
     }
     try {
-        await client.post('/usuarios', { nombre: adminTecnico.value.nombre, apellidos: adminTecnico.value.apellidos, email: adminTecnico.value.correo, password: adminTecnico.value.password || 'password', rol: 1, numero_empleado: 'ADM-001' })
-        for (const tech of tecnicos.value) {
-            if (tech.nombre || tech.correo) {
-                await client.post('/usuarios', { nombre: tech.nombre, apellidos: tech.apellidos || '', email: tech.correo || `tech-${Date.now()}@tmp.com`, password: 'password', rol: 3, numero_empleado: tech.numeroEmpleado || `EMP-${Date.now()}` })
-            }
+        await client.post('/usuarios', { nombre: adminTecnico.value.nombre, apellidos: adminTecnico.value.apellidos, email: adminTecnico.value.correo, password: adminTecnico.value.password, rol: 1, numero_empleado: 'ADM-001' })
+        created.value.push({ email: adminTecnico.value.correo, password: adminTecnico.value.password, rol: 'Administrador Técnico' })
+        for (const tech of pendientes) {
+            const password = generarPassword()
+            await client.post('/usuarios', { nombre: tech.nombre, apellidos: tech.apellidos || '', email: tech.correo, password, rol: 3, numero_empleado: tech.numeroEmpleado || `EMP-${Date.now()}` })
+            created.value.push({ email: tech.correo, password, rol: 'Técnico' })
         }
         toast.success('¡Configuración completada!')
-        router.push({ name: 'dashboard' })
+        finished.value = true
     } catch(e:any){ toast.error(e?.response?.data?.message || 'Error') }
 }
 </script>
@@ -115,10 +135,33 @@ const completeOnboarding = async () => {
             </div>
 
             <!-- Footer Action -->
-            <div class="wizard-footer">
+            <div v-if="!finished" class="wizard-footer">
                 <button class="btn-complete" @click="completeOnboarding">
                     Completar Configuración y Entrar al Dashboard
                 </button>
+            </div>
+
+            <!-- Credenciales generadas -->
+            <div v-else class="wizard-section">
+                <div class="section-title">
+                    <h2>Equipo creado</h2>
+                    <p class="subtitle">Guarda estas credenciales y compártelas con tu equipo. Son temporales: cada usuario podrá cambiarlas después.</p>
+                </div>
+                <div class="technicians-list">
+                    <div v-for="c in created" :key="c.email" class="technician-row">
+                        <div class="row-number">{{ c.rol.charAt(0) }}</div>
+                        <div class="tech-inputs">
+                            <input type="text" :value="c.rol" readonly />
+                            <input type="text" :value="c.email" readonly />
+                            <input type="text" :value="c.password" readonly />
+                        </div>
+                    </div>
+                </div>
+                <div class="wizard-footer" style="padding: 1.5rem 0 0;">
+                    <button class="btn-complete" @click="router.push({ name: 'dashboard' })">
+                        Ir al Dashboard
+                    </button>
+                </div>
             </div>
 
         </div>

@@ -2,6 +2,7 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
 import router from './router'
+import { useAuthStore } from './stores/authStore'
 
 const lrId = import.meta.env.VITE_LOGROCKET_ID as string | undefined
 if (lrId && lrId.trim() !== '' && lrId !== 'your-company/your-app' && lrId.includes('/')) {
@@ -39,6 +40,9 @@ app.use(VueApexCharts)
 
 // Sesión expirada (401 tras revalidación): redirigir al login conservando el destino
 window.addEventListener('auth:expirado', () => {
+  // Limpiar el store: si no, el guard `guestOnly` vuelve a mandar a dashboard
+  // y el usuario queda atrapado sin poder llegar al login.
+  useAuthStore().clearAuth()
   if (router.currentRoute.value.name !== 'login') {
     router.push({ name: 'login', query: { redirect: router.currentRoute.value.fullPath, expirada: '1' } })
   }

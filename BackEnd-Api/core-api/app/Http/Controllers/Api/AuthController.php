@@ -141,11 +141,17 @@ class AuthController extends Controller
     public function logout(Request $request): JsonResponse
     {
         $user = $request->user();
+
         if ($user) {
-            $user->current_device = null;
-            $user->save();
+            $request->user()->currentAccessToken()->delete();
+
+            // Con sesiones simultáneas, current_device solo se limpia cuando
+            // ya no queda ninguna sesión abierta para el usuario.
+            if ($user->tokens()->count() === 0) {
+                $user->current_device = null;
+                $user->save();
+            }
         }
-        $request->user()->currentAccessToken()->delete();
 
         return response()->json(['message' => 'logout']);
     }

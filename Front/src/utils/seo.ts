@@ -84,11 +84,81 @@ export function applySeo(options: SeoOptions): void {
     }
 }
 
-/** Aplica el SEO y lo mantiene sincronizado con la ruta actual. */
+const MANAGED_TAGS: Array<['name' | 'property', string]> = [
+    ['name', 'description'],
+    ['name', 'robots'],
+    ['property', 'og:type'],
+    ['property', 'og:site_name'],
+    ['property', 'og:locale'],
+    ['property', 'og:title'],
+    ['property', 'og:description'],
+    ['property', 'og:url'],
+    ['property', 'og:image'],
+    ['name', 'twitter:card'],
+    ['name', 'twitter:title'],
+    ['name', 'twitter:description'],
+    ['name', 'twitter:image'],
+]
+
+interface SeoSnapshot {
+    title: string
+    meta: Map<string, string | null>
+    canonical: string | null
+}
+
+let pristine: SeoSnapshot | null = null
+let activeInstances = 0
+
+function capturePristine(): void {
+    const meta = new Map<string, string | null>()
+    for (const [attr, key] of MANAGED_TAGS) {
+        const el = document.head.querySelector<HTMLMetaElement>(`meta[${attr}="${key}"]`)
+        meta.set(`${attr}:${key}`, el ? el.getAttribute('content') : null)
+    }
+    const canonical = document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]')
+    pristine = {
+        title: document.title,
+        meta,
+        canonical: canonical ? canonical.getAttribute('href') : null,
+    }
+}
+
+function restorePristine(): void {
+    if (!pristine) return
+    document.title = pristine.title
+    for (const [attr, key] of MANAGED_TAGS) {
+        const el = document.head.querySelector<HTMLMetaElement>(`meta[${attr}="${key}"]`)
+        const value = pristine.meta.get(`${attr}:${key}`)
+        if (value === null || value === undefined) {
+            el?.remove()
+        } else if (el) {
+            el.setAttribute('content', value)
+        }
+    }
+    const canonical = document.head.querySelector<HTMLLinkElement>('link[rel="canonical"]')
+    if (pristine.canonical === null) {
+        canonical?.remove()
+    } else if (canonical) {
+        canonical.setAttribute('href', pristine.canonical)
+    }
+}
+
+/**
+ * Aplica el SEO y lo mantiene sincronizado con la ruta actual.
+ * Al desmontar la última página pública, restaura las metas por defecto de
+ * index.html para que las vistas internas (/app) no hereden el SEO del sitio.
+ */
 export function useSeo(getOptions: () => SeoOptions): void {
+    if (!pristine) capturePristine()
+    activeInstances += 1
+
     watchEffect(() => applySeo(getOptions()))
 
     onBeforeUnmount(() => {
-        document.getElementById('seo-jsonld')?.remove()
+        activeInstances -= 1
+        if (activeInstances === 0) {
+            document.getElementById('seo-jsonld')?.remove()
+            restorePristine()
+        }
     })
 }

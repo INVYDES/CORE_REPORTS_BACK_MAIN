@@ -8,8 +8,8 @@
   RewriteRule ^api/(.*)$ api/index.php [L]
 
   # SPA fallback (Vue Router en history mode).
-  # La sustitución es relativa a propósito: funciona igual si el sitio se sirve
-  # en la raíz de creports.corion.mx o dentro de un subdirectorio.
+  # Nota: RewriteBase / y las rutas absolutas (/assets/...) de index.html asumen
+  # que el sitio se sirve en la raíz del dominio (no en un subdirectorio).
   RewriteRule ^index\.html$ - [L]
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
