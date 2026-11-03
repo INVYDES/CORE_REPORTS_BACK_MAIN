@@ -2,6 +2,12 @@
   RewriteEngine On
   RewriteBase /
 
+  # Pasar el header Authorization a PHP. En IONOS (CGI/FastCGI) Apache lo
+  # elimina por defecto, así que Sanctum recibía todas las peticiones sin
+  # Bearer token y respondía 401 aunque la sesión fuera válida.
+  RewriteCond %{HTTP:Authorization} .
+  RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
   # API: todo /api/* entra por api/index.php (Laravel vive fuera del docroot).
   # El !-f evita el bucle al reescribir api/index.php sobre sí mismo.
   RewriteCond %{REQUEST_FILENAME} !-f

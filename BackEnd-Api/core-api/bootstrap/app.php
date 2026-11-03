@@ -22,6 +22,13 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->append(\Illuminate\Http\Middleware\HandleCors::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        // La API siempre responde JSON: si una petición sin "Accept: application/json"
+        // llega sin token, Laravel intentaba redirigir a la ruta web "login"
+        // (inexistente) y devolvía 500 en lugar de un 401.
+        $exceptions->shouldRenderJsonWhen(
+            fn ($request) => $request->is('api/*') || $request->expectsJson()
+        );
+
         $exceptions->render(function (\Illuminate\Session\TokenMismatchException $e, $request) {
             if ($request->is('api/*')) {
                 return response()->json(['message' => 'Sesión expirada. Recarga la página e intenta de nuevo. No se requiere token CSRF para la API (usa Bearer Token).'], 419);
