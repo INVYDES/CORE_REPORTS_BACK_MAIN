@@ -20,6 +20,12 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->throttleApi('60,1');
         $middleware->append(\App\Http\Middleware\SecurityHeaders::class);
         $middleware->append(\Illuminate\Http\Middleware\HandleCors::class);
+
+        // Sin redirección web para la API: Laravel intentaba generar la ruta
+        // "login" (no existe) y lanzaba 500 al recibir peticiones sin token.
+        $middleware->redirectGuestsTo(
+            fn (\Illuminate\Http\Request $request) => $request->is('api/*') ? null : '/'
+        );
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // La API siempre responde JSON: si una petición sin "Accept: application/json"
@@ -28,6 +34,12 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn ($request) => $request->is('api/*') || $request->expectsJson()
         );
+
+        $exceptions->render(function (\Illuminate\Auth\AuthenticationException $e, $request) {
+            if ($request->is('api/*')) {
+                return response()->json(['message' => 'Unauthenticated.'], 401);
+            }
+        });
 
         $exceptions->render(function (\Illuminate\Session\TokenMismatchException $e, $request) {
             if ($request->is('api/*')) {

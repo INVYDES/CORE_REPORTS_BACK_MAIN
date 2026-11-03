@@ -5,10 +5,14 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Mail\NotificacionMail;
 use App\Models\Notificacion;
+use App\Models\Reporte;
+use App\Models\Servicio;
+use App\Models\Ticket;
 use App\Models\Usuario;
 use App\Traits\EnsuresDependencia;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Mail;
 
 class NotificacionController extends Controller
@@ -25,11 +29,91 @@ class NotificacionController extends Controller
         if ($request->filled('referencia_tipo')) {
             $q->where('referencia_tipo', $request->string('referencia_tipo'));
         }
+        if ($request->filled('usuario_id')) {
+            $q->where('usuario_id', (int) $request->get('usuario_id'));
+        }
+        if ($request->filled('area_id')) {
+            $areaId = (int) $request->get('area_id');
+
+            $q->where(function ($where) use ($areaId) {
+                $where
+                    ->where(function ($sub) use ($areaId) {
+                        $sub->where('referencia_tipo', 'ticket')
+                            ->whereIn('referencia_id', Ticket::query()->select('id')->where('area_id', $areaId));
+                    })
+                    ->orWhere(function ($sub) use ($areaId) {
+                        $sub->where('referencia_tipo', 'servicio')
+                            ->whereIn('referencia_id', Servicio::query()->select('id')->where('area_id', $areaId));
+                    })
+                    ->orWhere(function ($sub) use ($areaId) {
+                        $sub->where('referencia_tipo', 'reporte')
+                            ->whereIn('referencia_id', Reporte::query()->select('id')->where('area_id', $areaId));
+                    });
+            });
+        }
         if ($request->boolean('no_leidas')) {
             $q->whereNull('leida_at');
         }
 
-        return response()->json($q->orderByDesc('created_at')->paginate(min((int) $request->get('per_page', 15), 100)));
+        $noLeidas = (clone $q)->whereNull('leida_at')->count();
+
+        $paginator = $q->orderByDesc('created_at')->paginate(min((int) $request->get('per_page', 15), 100));
+        $this->attachReferenciaContext($paginator->getCollection());
+
+        $payload = $paginator->toArray();
+        $payload['no_leidas'] = $noLeidas;
+        $payload['meta']['no_leidas'] = $noLeidas;
+
+        return response()->json($payload);
+    }
+
+    private function attachReferenciaContext(Collection $items): void
+    {
+        if ($items->isEmpty()) {
+            return;
+        }
+
+        $ids = $items->groupBy('referencia_tipo')->map(
+            fn (Collection $rows) => $rows->pluck('referencia_id')->unique()->values()->all()
+        );
+
+        $modelos = [
+            'ticket' => Ticket::class,
+            'servicio' => Servicio::class,
+            'reporte' => Reporte::class,
+        ];
+
+        $entidades = [];
+        foreach ($modelos as $tipo => $modelo) {
+            if (empty($ids[$tipo])) {
+                continue;
+            }
+
+            $entidades[$tipo] = $modelo::query()
+                ->with('area:id,nombre,codigo')
+                ->whereIn('id', $ids[$tipo])
+                ->get()
+                ->keyBy('id');
+        }
+
+        foreach ($items as $notificacion) {
+            $entidad = $entidades[$notificacion->referencia_tipo][$notificacion->referencia_id] ?? null;
+            $area = $entidad?->area;
+
+            $notificacion->setAttribute('area_id', $entidad?->area_id);
+            $notificacion->setAttribute('area', $area ? [
+                'id' => $area->id,
+                'nombre' => $area->nombre,
+                'codigo' => $area->codigo,
+            ] : null);
+            $notificacion->setAttribute('referencia', $entidad ? [
+                'id' => $entidad->id,
+                'folio' => $entidad->folio ?? null,
+                'asunto' => $entidad->asunto ?? null,
+                'estatus' => $entidad->estatus ?? null,
+                'area_id' => $entidad->area_id,
+            ] : null);
+        }
     }
 
     public function store(Request $request): JsonResponse

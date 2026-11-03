@@ -1,12 +1,18 @@
 <script setup lang="ts">
-  import { computed, ref, onMounted } from 'vue'
+  import { computed, ref } from 'vue'
+  import { useRouter } from 'vue-router'
   import { Bell, Menu, Mail } from 'lucide-vue-next'
   import { useAuthStore } from '../../stores/authStore'
   import { storeToRefs } from 'pinia'
-  import { notificacionesApi } from '../../api/notificaciones'
+  import {
+    useNotificacionesRealtime,
+    type NotificacionItem,
+  } from '../../composables/useNotificacionesRealtime'
+  import { notificationTarget } from '../../utils/notificacionTarget'
 
-  const emit = defineEmits(['toggle-sidebar'])
+  defineEmits(['toggle-sidebar'])
 
+  const router = useRouter()
   const authStore = useAuthStore()
   const { currentUser } = storeToRefs(authStore)
 
@@ -14,40 +20,38 @@
     () => (currentUser.value as any)?.dependencia?.nombre || 'CoreReports'
   )
 
-  const notifications = ref<any[]>([])
   const showDropdown = ref(false)
-  const loadingNotif = ref(false)
-  const unreadCount = computed(() => notifications.value.filter(n => !n.leida_at).length)
+  const {
+    notifications,
+    unreadCount,
+    loading: loadingNotif,
+    isLive,
+    hasNew,
+    fetchNotifications,
+    markRead,
+    markAllRead,
+    clearNew,
+  } = useNotificacionesRealtime()
 
-  const fetchNotifications = async () => {
-    try {
-      loadingNotif.value = true
-      const res = await notificacionesApi.list({ per_page: 20 })
-      const list = res.data || res
-      notifications.value = Array.isArray(list) ? list : []
-    } catch {
-    } finally {
-      loadingNotif.value = false
-    }
-  }
   const toggleDropdown = () => {
     showDropdown.value = !showDropdown.value
-    if (showDropdown.value) fetchNotifications()
+    if (showDropdown.value) {
+      clearNew()
+      fetchNotifications()
+    }
   }
-  const markRead = async (id: number) => {
-    try {
-      await notificacionesApi.markRead(id)
-      const n = notifications.value.find(x => x.id === id)
-      if (n) n.leida_at = new Date().toISOString()
-    } catch {}
+
+  const openNotification = async (notification: NotificacionItem) => {
+    showDropdown.value = false
+    clearNew()
+
+    if (!notification.leida_at) {
+      void markRead(notification.id)
+    }
+
+    const target = notificationTarget(notification)
+    if (target) await router.push(target)
   }
-  const markAllRead = async () => {
-    try {
-      await notificacionesApi.markAllRead()
-      notifications.value.forEach(n => (n.leida_at = n.leida_at || new Date().toISOString()))
-    } catch {}
-  }
-  onMounted(fetchNotifications)
 
   const initialName = computed(() => {
     const nombre = currentUser.value?.nombre
@@ -87,7 +91,12 @@
       <!-- Right Header -->
       <div class="header-right">
         <!--Icon real conectado a /api/notificaciones -->
-        <div class="icon-btn" @click="toggleDropdown" title="Notificaciones">
+        <div
+          class="icon-btn"
+          :class="{ 'has-new': hasNew }"
+          title="Notificaciones"
+          @click="toggleDropdown"
+        >
           <Bell :size="20" />
           <span v-if="unreadCount > 0" class="badge">{{
             unreadCount > 9 ? '9+' : unreadCount
@@ -95,12 +104,20 @@
 
           <div v-if="showDropdown" class="notif-dropdown" @click.stop>
             <div class="notif-header">
-              <span class="notif-title">Notificaciones</span>
-              <button v-if="unreadCount > 0" @click="markAllRead" class="mark-all">
+              <div class="notif-heading">
+                <span class="notif-title">Notificaciones</span>
+                <span class="notif-live" :class="{ online: isLive }">
+                  <span class="live-dot"></span>
+                  {{ isLive ? 'En vivo' : 'Reconectando' }}
+                </span>
+              </div>
+              <button v-if="unreadCount > 0" class="mark-all" @click="markAllRead">
                 Marcar todas leídas
               </button>
             </div>
-            <div v-if="loadingNotif" class="notif-empty">Cargando...</div>
+            <div v-if="loadingNotif && notifications.length === 0" class="notif-empty">
+              Cargando...
+            </div>
             <div v-else-if="notifications.length === 0" class="notif-empty">Sin notificaciones</div>
             <div v-else class="notif-list">
               <div
@@ -108,15 +125,16 @@
                 :key="n.id"
                 class="notif-item"
                 :class="{ unread: !n.leida_at }"
-                @click="markRead(n.id)"
+                @click="openNotification(n)"
               >
                 <div class="notif-icon"><Mail :size="14" /></div>
                 <div class="notif-content">
                   <div class="notif-asunto">{{ n.titulo || n.asunto }}</div>
                   <div class="notif-cuerpo">{{ n.cuerpo?.slice(0, 80) }}</div>
                   <div class="notif-meta">
-                    {{ n.referencia_tipo }} #{{ n.referencia_id }} ·
-                    {{ new Date(n.created_at).toLocaleDateString() }}
+                    <span v-if="n.area?.nombre" class="notif-area">{{ n.area.nombre }}</span>
+                    <span>{{ n.referencia?.folio || `${n.referencia_tipo} #${n.referencia_id}` }}</span>
+                    <span>{{ new Date(n.created_at).toLocaleDateString() }}</span>
                   </div>
                 </div>
                 <span v-if="!n.leida_at" class="dot"></span>
@@ -263,6 +281,20 @@
       font-weight: bold;
       border: 2px solid white;
     }
+
+    &.has-new .badge {
+      animation: badge-pulse 1.2s ease-in-out infinite;
+    }
+  }
+
+  @keyframes badge-pulse {
+    0%,
+    100% {
+      transform: scale(1);
+    }
+    50% {
+      transform: scale(1.18);
+    }
   }
 
   .notif-dropdown {
@@ -287,10 +319,39 @@
     padding: 12px 16px;
     border-bottom: 1px solid #f1f5f9;
     background: #f8fafc;
+    .notif-heading {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
     .notif-title {
       font-weight: 700;
       font-size: 0.9rem;
       color: #0f172a;
+    }
+    .notif-live {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 0.65rem;
+      font-weight: 600;
+      color: #94a3b8;
+
+      .live-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #cbd5e1;
+      }
+
+      &.online {
+        color: #16a34a;
+
+        .live-dot {
+          background: #22c55e;
+          box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.15);
+        }
+      }
     }
     .mark-all {
       background: none;
@@ -356,9 +417,18 @@
       text-overflow: ellipsis;
     }
     .notif-meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
       font-size: 0.7rem;
       color: #94a3b8;
       margin-top: 4px;
+
+      .notif-area {
+        font-weight: 600;
+        color: #4f46e5;
+      }
     }
     .dot {
       width: 8px;
