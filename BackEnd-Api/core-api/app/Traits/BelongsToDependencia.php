@@ -3,7 +3,10 @@
 namespace App\Traits;
 
 use App\Models\Dependencia;
+use App\Models\Usuario;
 use App\Scopes\DependenciaScope;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 trait BelongsToDependencia
@@ -12,19 +15,26 @@ trait BelongsToDependencia
     {
         static::addGlobalScope(new DependenciaScope);
 
-        static::creating(function ($model) {
-            if (empty($model->dependencia_id) && auth()->check()) {
-                $model->dependencia_id = auth()->user()->dependencia_id;
+        static::creating(function (Model $model) {
+            $user = auth()->user();
+
+            if (empty($model->getAttribute('dependencia_id')) && $user instanceof Usuario) {
+                $model->setAttribute('dependencia_id', $user->dependencia_id);
             }
         });
     }
 
+    /** @return BelongsTo<Dependencia, $this> */
     public function dependencia(): BelongsTo
     {
         return $this->belongsTo(Dependencia::class, 'dependencia_id');
     }
 
-    public function scopeSinDependenciaScope($query)
+    /**
+     * @param  Builder<static>  $query
+     * @return Builder<static>
+     */
+    public function scopeSinDependenciaScope(Builder $query): Builder
     {
         return $query->withoutGlobalScope(DependenciaScope::class);
     }

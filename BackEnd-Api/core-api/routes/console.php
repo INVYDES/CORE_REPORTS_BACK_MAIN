@@ -10,3 +10,4 @@ Artisan::command('inspire', function () {
 
 Schedule::job(new \App\Jobs\MarcarServiciosVencidos)->dailyAt('00:30');
 Schedule::job(new \App\Jobs\CheckLicenciasVencidas)->dailyAt('01:00');
+Schedule::job(new \App\Jobs\EnviarNotificacionesPendientes)->everyFiveMinutes()->withoutOverlapping();

@@ -47,7 +47,7 @@ class UsuarioController extends Controller
             'numero_empleado' => 'nullable|string|max:50',
         ]);
 
-        $dep = $request->user()->dependencia;
+        $dep = $this->usuario($request)->dependencia;
 
         if (Usuario::where('dependencia_id', $dep->id)->count() >= $dep->limite_usuarios) {
             return response()->json(['message' => 'Límite de usuarios alcanzado'], 422);

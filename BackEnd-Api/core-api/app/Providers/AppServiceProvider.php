@@ -13,6 +13,8 @@ class AppServiceProvider extends ServiceProvider
     /**
      * Políticas registradas manualmente (los nombres de modelo no coinciden
      * con la convención de descubrimiento automático en todos los casos).
+     *
+     * @var array<class-string, class-string>
      */
     private array $policies = [
         \App\Models\Ticket::class => \App\Policies\TicketPolicy::class,
@@ -35,6 +37,13 @@ class AppServiceProvider extends ServiceProvider
         foreach ($this->policies as $model => $policy) {
             Gate::policy($model, $policy);
         }
+
+        // Observers: sincronización de estatus, historial y notificaciones.
+        // Se registran explícitamente porque los nombres de modelo no siguen
+        // la convención de descubrimiento automático de Laravel.
+        \App\Models\Reporte::observe(\App\Observers\ReporteObserver::class);
+        \App\Models\Ticket::observe(\App\Observers\TicketObserver::class);
+        \App\Models\Servicio::observe(\App\Observers\ServicioObserver::class);
 
         $this->registerRateLimiters();
     }

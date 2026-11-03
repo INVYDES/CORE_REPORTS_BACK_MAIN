@@ -123,4 +123,15 @@ return [
         'store' => env('APP_MAINTENANCE_STORE', 'database'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Frontend URL
+    |--------------------------------------------------------------------------
+    |
+    | Base pública del frontend usada en los back_urls de Mercado Pago.
+    |
+    */
+
+    'frontend_url' => env('FRONTEND_URL', ''),
+
 ];

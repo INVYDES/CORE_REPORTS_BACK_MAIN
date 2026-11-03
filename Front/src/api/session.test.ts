@@ -1,12 +1,22 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import {
-  getToken, getUser, setSession, setToken, clearSession,
+  getToken,
+  getUser,
+  setSession,
+  setToken,
+  clearSession,
   type UsuarioAlmacenado,
 } from './session'
 
 const usuario: UsuarioAlmacenado = {
-  id: 1, dependencia_id: 1, numero_empleado: 'EMP001', rol: 1,
-  nombre: 'Admin', apellidos: 'Tec', email: 'a@b.com', estado: true,
+  id: 1,
+  dependencia_id: 1,
+  numero_empleado: 'EMP001',
+  rol: 1,
+  nombre: 'Admin',
+  apellidos: 'Tec',
+  email: 'a@b.com',
+  estado: true,
 }
 
 describe('session', () => {

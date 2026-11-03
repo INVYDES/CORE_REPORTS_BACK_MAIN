@@ -13,9 +13,9 @@ class NotificacionMail extends Mailable
 
     public function __construct(public Notificacion $notificacion) {}
 
-    public function build()
+    public function build(): void
     {
-        return $this->subject($this->notificacion->asunto ?? 'Notificación CoreReports')
+        $this->subject($this->notificacion->asunto ?? 'Notificación CoreReports')
             ->view('emails.notificacion')
             ->with(['notif' => $this->notificacion]);
     }

@@ -3,38 +3,43 @@ type BackendPayload = Record<string, any>
 const categoriaMap: Record<string, string> = {
   'Mantenimiento Preventivo': 'preventivo',
   'Mantenimiento Correctivo': 'correctivo',
-  'Instalación': 'instalacion',
-  'Instalacion': 'instalacion',
-  'Mejora': 'mejora',
-  'Diagnóstico': 'diagnostico',
-  'Diagnostico': 'diagnostico',
-  'preventivo': 'preventivo',
-  'correctivo': 'correctivo',
-  'instalacion': 'instalacion',
-  'mejora': 'mejora',
-  'diagnostico': 'diagnostico',
+  Instalación: 'instalacion',
+  Instalacion: 'instalacion',
+  Mejora: 'mejora',
+  Diagnóstico: 'diagnostico',
+  Diagnostico: 'diagnostico',
+  preventivo: 'preventivo',
+  correctivo: 'correctivo',
+  instalacion: 'instalacion',
+  mejora: 'mejora',
+  diagnostico: 'diagnostico',
 }
 
 const tipoMap: Record<string, string> = {
-  'Ticket': 'ticket',
+  Ticket: 'ticket',
   'Servicio Programado': 'servicio',
-  'Libre': 'libre',
-  'ticket': 'ticket',
-  'servicio': 'servicio',
-  'libre': 'libre',
+  Libre: 'libre',
+  ticket: 'ticket',
+  servicio: 'servicio',
+  libre: 'libre',
 }
 
 const prioridadMap: Record<string, string> = {
-  'Baja': 'baja', 'Media': 'media', 'Alta': 'alta',
-  'baja': 'baja', 'media': 'media', 'alta': 'alta',
+  Baja: 'baja',
+  Media: 'media',
+  Alta: 'alta',
+  baja: 'baja',
+  media: 'media',
+  alta: 'alta',
 }
 
 const estatusReporteMap: Record<string, string> = {
   'Abierto / Trabajo Parcial': 'parcial',
-  'Abierto': 'abierto',
+  Abierto: 'abierto',
   'Cerrado / Trabajo Finalizado': 'finalizado',
   'Descartado / Cancelado': 'descartado',
-  'parcial': 'parcial', 'finalizado': 'finalizado',
+  parcial: 'parcial',
+  finalizado: 'finalizado',
 }
 
 function clean(obj: Record<string, any>): BackendPayload {
@@ -94,9 +99,11 @@ export function mapReporteForBackend(front: any, fileList: File[] = []): Backend
   const categoria = categoriaMap[front.categoria] || 'correctivo'
   const estatus = estatusReporteMap[front.estatusReporte] || 'parcial'
 
-  if (tipo !== 'libre' && !front.origenDatosId) throw new Error('Selecciona un Ticket/Servicio origen')
+  if (tipo !== 'libre' && !front.origenDatosId)
+    throw new Error('Selecciona un Ticket/Servicio origen')
   if (!front.fechaHoraInicio || !front.fechaHoraFin) throw new Error('Fecha inicio/fin requeridas')
-  if (estatus === 'finalizado' && !front.horaRegresoABase) throw new Error('Hora regreso a base obligatoria al cerrar')
+  if (estatus === 'finalizado' && !front.horaRegresoABase)
+    throw new Error('Hora regreso a base obligatoria al cerrar')
 
   const payload = {
     folio: undefined, // backend lo genera si no viene, aquí lo dejamos que lo genere ReporteController
@@ -147,7 +154,9 @@ export async function buildReporteFormData(mapped: BackendPayload, client: any):
       mapped._materialesRaw.forEach((m: any, idx: number) => {
         let matId = m.material_id
         if (!matId && m.material) {
-          const found = cat.find((c: any) => c.nombre.toLowerCase() === m.material.toLowerCase().trim())
+          const found = cat.find(
+            (c: any) => c.nombre.toLowerCase() === m.material.toLowerCase().trim()
+          )
           matId = found?.id || cat[0]?.id
         }
         if (matId) {
@@ -155,7 +164,9 @@ export async function buildReporteFormData(mapped: BackendPayload, client: any):
           fd.append(`materiales[${idx}][cantidad]`, String(m.cantidad || 1))
         }
       })
-    } catch { /* no-op */ }
+    } catch {
+      /* no-op */
+    }
   }
 
   ;(mapped._files || []).forEach((f: File) => fd.append('evidencias[]', f))
@@ -163,4 +174,9 @@ export async function buildReporteFormData(mapped: BackendPayload, client: any):
   return fd
 }
 
-export default { mapTicketForBackend, mapServicioForBackend, mapReporteForBackend, buildReporteFormData }
+export default {
+  mapTicketForBackend,
+  mapServicioForBackend,
+  mapReporteForBackend,
+  buildReporteFormData,
+}

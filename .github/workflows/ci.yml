@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        php: ['8.2']
+        php: ['8.5']
     defaults:
       run:
         working-directory: BackEnd-Api/core-api
@@ -47,14 +47,16 @@ jobs:
         run: vendor/bin/pint --test
 
       - name: PHPStan
-        run: vendor/bin/phpstan analyse --error-format=github || vendor/bin/phpstan analyse
+        run: vendor/bin/phpstan analyse --error-format=github
 
+      # Cobertura medida con xdebug: 54.45% de líneas. El umbral deja margen
+      # para no fallar por redondeos y detecta regresiones reales.
       - name: Run tests (PHPUnit)
         env:
           DB_CONNECTION: sqlite
           DB_DATABASE: ":memory:"
           APP_ENV: testing
-        run: php artisan test --coverage --min=70 || php artisan test
+        run: php artisan test --coverage --min=53
 
       - name: Upload backend artifact (vendor)
         if: always()
@@ -95,8 +97,8 @@ jobs:
       - name: Vitest (unit)
         run: npm run test -- --coverage
 
-      - name: Build
-        run: npm run build
+      - name: Typecheck + Build
+        run: npm run build:check
 
       - name: Upload dist artifact
         uses: actions/upload-artifact@v4

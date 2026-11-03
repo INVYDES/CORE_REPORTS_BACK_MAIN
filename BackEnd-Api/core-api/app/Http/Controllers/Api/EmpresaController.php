@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Dependencia;
 use App\Services\UploadStorageService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -17,7 +18,7 @@ class EmpresaController extends Controller
      * GET /api/v1/empresa o /api/empresa
      * Obtiene los datos comerciales y de configuración de la empresa (dependencia) actual
      */
-    public function show(Request $request)
+    public function show(Request $request): JsonResponse
     {
         $empresa = $this->empresaDelUsuario($request);
 
@@ -38,7 +39,7 @@ class EmpresaController extends Controller
      * PUT /api/v1/empresa o /api/empresa
      * Actualiza la información general y fiscal de la empresa
      */
-    public function update(Request $request)
+    public function update(Request $request): JsonResponse
     {
         if (! $this->puedeEditar($request)) {
             return response()->json([
@@ -88,7 +89,7 @@ class EmpresaController extends Controller
      * POST /api/v1/empresa/logo o /api/empresa/logo
      * Sube y actualiza el logotipo oficial de la empresa (Multipart o Base64)
      */
-    public function uploadLogo(Request $request)
+    public function uploadLogo(Request $request): JsonResponse
     {
         if (! $this->puedeEditar($request)) {
             return response()->json([
@@ -107,11 +108,13 @@ class EmpresaController extends Controller
         }
 
         $path = null;
+        $ruta = null;
+        $disco = null;
 
         // Opción 1: archivo multipart tradicional
         if ($request->hasFile('logo')) {
             $validator = Validator::make($request->all(), [
-                'logo' => 'required|image|mimes:jpeg,png,jpg,gif,svg,webp|max:4096',
+                'logo' => 'required|image|mimes:jpeg,png,jpg,gif,webp|max:4096',
             ], [
                 'logo.image' => 'El archivo debe ser una imagen válida.',
                 'logo.max' => 'La imagen no debe superar los 4 MB.',
@@ -124,7 +127,13 @@ class EmpresaController extends Controller
                 ], 422);
             }
 
-            $path = $this->uploads->storeFile($request->file('logo'), 'logos');
+            $path = $this->uploads->storeFile(
+                $request->file('logo'),
+                'logos',
+                $this->uploads->visibilityFor(true)
+            );
+            $ruta = $path;
+            $disco = $this->uploads->diskName();
         }
         // Opción 2: cadena base64 enviada en JSON
         elseif ($request->filled('logo')) {
@@ -133,12 +142,23 @@ class EmpresaController extends Controller
             $decoded = $this->uploads->decodeImageDataUri($logoInput);
 
             if ($decoded) {
-                $path = $this->uploads->storeContents($decoded['contents'], 'logos', $decoded['extension']);
-            } elseif (str_starts_with($logoInput, 'http') || str_starts_with($logoInput, '/uploads/') || str_starts_with($logoInput, 'logos/')) {
+                $path = $this->uploads->storeContents(
+                    $decoded['contents'],
+                    'logos',
+                    $decoded['extension'],
+                    $this->uploads->visibilityFor(true)
+                );
+                $ruta = $path;
+                $disco = $this->uploads->diskName();
+            } elseif (str_starts_with($logoInput, 'http')) {
+                $path = $logoInput;
+            } elseif (str_starts_with($logoInput, '/uploads/') || str_starts_with($logoInput, 'logos/')) {
                 // Referencia a un logotipo ya almacenado
                 $path = basename($logoInput) === $logoInput
                     ? 'logos/'.$logoInput
-                    : $logoInput;
+                    : ltrim($logoInput, '/');
+                $ruta = $this->uploads->pathFromUrl($path) ?: $path;
+                $disco = $this->uploads->diskName();
             }
         }
 
@@ -150,6 +170,8 @@ class EmpresaController extends Controller
         }
 
         $empresa->logo = $path;
+        $empresa->logo_ruta = $ruta;
+        $empresa->logo_disco = $disco;
         $empresa->save();
 
         return response()->json([
@@ -161,7 +183,7 @@ class EmpresaController extends Controller
 
     private function empresaDelUsuario(Request $request): ?Dependencia
     {
-        $user = $request->user();
+        $user = $this->usuario($request);
         $idEmpresa = $user->dependencia_id ?? $user->id_dependencia ?? null;
 
         return $idEmpresa ? Dependencia::find($idEmpresa) : null;
@@ -169,11 +191,13 @@ class EmpresaController extends Controller
 
     private function puedeEditar(Request $request): bool
     {
-        return in_array((int) $request->user()->rol, [1, 2], true);
+        return in_array((int) $this->usuario($request)->rol, [1, 2], true);
     }
 
     /**
      * Formateador estándar de la empresa con compatibilidad camelCase
+     *
+     * @return array<string, mixed>
      */
     private function formatEmpresa(Dependencia $e): array
     {
@@ -193,7 +217,9 @@ class EmpresaController extends Controller
             'activo' => (bool) ($e->activa ?? true),
             'fechaRegistro' => $e->created_at ? $e->created_at->format('Y-m-d') : null,
             'limiteUsuarios' => (int) ($e->limite_usuarios ?? 10),
-            'logo' => $this->uploads->url($e->logo),
+            'logo' => $e->logo_ruta
+                ? $this->uploads->urlForDisk($e->logo_disco ?: $this->uploads->diskName(), $e->logo_ruta)
+                : $this->uploads->url($e->logo),
         ];
     }
 }

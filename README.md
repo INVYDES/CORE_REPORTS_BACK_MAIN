@@ -2,7 +2,7 @@
 
 Sistema multi-tenant para gestión de tickets, servicios programados y reportes técnicos con analytics en vivo.
 
-**Stack:** Laravel 12 (PHP 8.2) + Vue 3 + Vite + MySQL 8 + Sanctum + Pinia
+**Stack:** Laravel 12 (PHP 8.5) + Vue 3 + Vite + MySQL 8 + Sanctum + Pinia
 
 ## Arquitectura
 ```
@@ -15,7 +15,7 @@ CsRecords/
 ```
 
 ## Requisitos
-- PHP 8.2, Composer, Node 20, MySQL 8, Docker (opcional)
+- PHP 8.5, Composer, Node 20, MySQL 8, Docker (opcional)
 
 ## Instalación local (sin Docker)
 ```bash
@@ -50,6 +50,25 @@ docker compose up --build
 # Queue + scheduler corren en el servicio `worker` (queue:work + schedule:work)
 ```
 
+## Runtime de producción (Docker/Railway/Cloud Run)
+El contenedor arranca procesos bajo supervisor segun `CONTAINER_ROLE`:
+
+| Rol | Procesos |
+| --- | --- |
+| `all` (default) | web + worker de cola + scheduler |
+| `web` | `php artisan serve` (`PHP_CLI_SERVER_WORKERS`, default 4) |
+| `worker` | `queue:work` + `schedule:work` |
+| `scheduler` | solo `schedule:work` |
+
+- Solo los roles `web` y `all` ejecutan migraciones al arrancar; usa
+  `RUN_MIGRATIONS=false` para desactivarlas o `CONTAINER_ROLE=worker` en un
+  servicio aparte.
+- El scheduler dispara los jobs de `routes/console.php`:
+  `EnviarNotificacionesPendientes` (cada 5 min), `MarcarServiciosVencidos` y
+  `CheckLicenciasVencidas` (diarios). Sin worker/scheduler esos jobs nunca corren.
+- SLA de tickets por prioridad (horas): `SLA_TICKET_ALTA_HORAS` (4),
+  `SLA_TICKET_MEDIA_HORAS` (24), `SLA_TICKET_BAJA_HORAS` (72). Ver `config/sla.php`.
+
 ## Usuarios demo (password: `password`)
 - `admin.tec@core.com` (AdminTec, rol 1) - ve tickets, reportes, análisis
 - `admin.com@core.com` (AdminCom, rol 2) - ve análisis, subáreas
@@ -83,7 +102,7 @@ npm run test -- --coverage # vitest 70% threshold
 npm run build            # vite build
 npm run storybook        # http://localhost:6006 (StatCard)
 ```
-CI: `.github/workflows/ci.yml` (PHP 8.2 + Node 20, install, pint, phpstan, phpunit, eslint, prettier, vitest, build, artifacts). Husky pre-commit: `pint --test && npm run lint && npm run test`.
+CI: `.github/workflows/ci.yml` (PHP 8.5 + Node 20, install, pint, phpstan, phpunit, eslint, prettier, vitest, build, artifacts). Husky pre-commit: `pint --test && npm run lint && npm run test`.
 
 ## Estructura DB
 - 13 tablas base + 4 nuevas (areas, equipos, notificaciones, movimientos_inventario) + 6 framework (jobs, cache, sessions...) + 1 encuestas + 10 columnas fiscales en dependencias

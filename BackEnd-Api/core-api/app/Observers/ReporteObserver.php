@@ -2,96 +2,78 @@
 
 namespace App\Observers;
 
-use App\Mail\NotificacionMail;
 use App\Models\Notificacion;
 use App\Models\Reporte;
-use App\Models\ServicioHistorial;
-use App\Models\TicketHistorial;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Mail;
 
 class ReporteObserver
 {
+    /**
+     * Sincroniza el estatus del ticket/servicio origen y encola la
+     * notificación de reporte finalizado. El envío de correo lo hace el job
+     * EnviarNotificacionesPendientes: aquí solo se persiste la notificación.
+     */
     public function saved(Reporte $reporte): void
     {
-        // Sincroniza estatus padre según MD 7
-        $userId = Auth::id() ?? $reporte->creado_por;
-
-        if ($reporte->ticket_id && $reporte->ticket) {
+        if ($reporte->ticket_id) {
             $ticket = $reporte->ticket;
-            $nuevo = null;
-            if ($reporte->estatus === 'finalizado') {
-                $nuevo = 'resuelto';
-            } elseif ($reporte->estatus === 'parcial') {
-                $nuevo = 'en_proceso';
-            }
+            $nuevo = match ($reporte->estatus) {
+                'finalizado' => 'resuelto',
+                'parcial' => 'en_proceso',
+                default => null,
+            };
 
-            if ($nuevo && $ticket->estatus !== $nuevo) {
-                $anterior = $ticket->estatus;
-                $ticket->update(['estatus' => $nuevo]);
-                TicketHistorial::create([
-                    'dependencia_id' => $ticket->dependencia_id,
-                    'ticket_id' => $ticket->id,
-                    'estatus_anterior' => $anterior,
-                    'estatus_nuevo' => $nuevo,
-                    'cambiado_por' => $userId,
-                    'fecha_cambio' => now(),
+            if ($ticket !== null && $nuevo !== null && $ticket->estatus !== $nuevo) {
+                // TicketObserver registra el historial y la notificación.
+                $ticket->update([
+                    'estatus' => $nuevo,
+                    'fecha_atencion' => $ticket->fecha_atencion ?? now(),
                 ]);
-                if ($nuevo === 'resuelto' || $nuevo === 'en_proceso') {
-                    $ticket->update(['fecha_atencion' => $ticket->fecha_atencion ?? now()]);
-                }
             }
         }
 
-        if ($reporte->servicio_id && $reporte->servicio) {
+        if ($reporte->servicio_id) {
             $servicio = $reporte->servicio;
-            $nuevo = null;
-            if ($reporte->estatus === 'finalizado') {
-                $nuevo = 'realizado';
-            } elseif ($reporte->estatus === 'parcial') {
-                $nuevo = 'en_proceso';
-            }
+            $nuevo = match ($reporte->estatus) {
+                'finalizado' => 'realizado',
+                'parcial' => 'en_proceso',
+                default => null,
+            };
 
-            if ($nuevo && $servicio->estatus !== $nuevo) {
-                $anterior = $servicio->estatus;
+            if ($servicio !== null && $nuevo !== null && $servicio->estatus !== $nuevo) {
+                // ServicioObserver registra el historial y la notificación.
                 $servicio->update(['estatus' => $nuevo]);
-                ServicioHistorial::create([
-                    'dependencia_id' => $servicio->dependencia_id,
-                    'servicio_id' => $servicio->id,
-                    'estatus_anterior' => $anterior,
-                    'estatus_nuevo' => $nuevo,
-                    'cambiado_por' => $userId,
-                    'fecha_cambio' => now(),
-                ]);
             }
         }
 
-        if ($reporte->wasRecentlyCreated || $reporte->wasChanged('estatus')) {
-            if ($reporte->estatus === 'finalizado') {
-                $dep = $reporte->dependencia;
-                $dest = $dep->correo_reportes ?? $dep->correo_contacto;
-                $notif = Notificacion::create([
-                    'dependencia_id' => $reporte->dependencia_id,
-                    'usuario_id' => $reporte->creado_por,
-                    'tipo' => 'reporte_finalizado',
-                    'titulo' => 'Reporte finalizado '.$reporte->folio,
-                    'referencia_tipo' => 'reporte',
-                    'referencia_id' => $reporte->id,
-                    'destinatario' => $dest,
-                    'asunto' => 'Reporte '.$reporte->folio.' finalizado',
-                    'cuerpo' => "El reporte {$reporte->folio} ha sido finalizado por el técnico. Tipo: {$reporte->tipo}, Categoría: {$reporte->categoria}",
-                    'estatus' => 'pendiente',
-                    'created_at' => now(),
-                ]);
-                if ($dest) {
-                    try {
-                        Mail::to($dest)->send(new NotificacionMail($notif));
-                        $notif->update(['estatus' => 'enviado', 'enviado_at' => now()]);
-                    } catch (\Throwable $e) {
-                        $notif->update(['estatus' => 'fallido']);
-                    }
-                }
-            }
+        if (($reporte->wasRecentlyCreated || $reporte->wasChanged('estatus')) && $reporte->estatus === 'finalizado') {
+            $this->notificarFinalizado($reporte);
         }
+    }
+
+    private function notificarFinalizado(Reporte $reporte): void
+    {
+        $dep = $reporte->dependencia;
+        $dest = $dep?->correo_reportes ?: $dep?->correo_contacto;
+
+        if (! $dest) {
+            return;
+        }
+
+        $usuarioId = Auth::id() ?? $reporte->creado_por;
+
+        Notificacion::create([
+            'dependencia_id' => $reporte->dependencia_id,
+            'usuario_id' => $usuarioId,
+            'tipo' => 'reporte_finalizado',
+            'titulo' => 'Reporte finalizado '.$reporte->folio,
+            'referencia_tipo' => 'reporte',
+            'referencia_id' => $reporte->id,
+            'destinatario' => $dest,
+            'asunto' => 'Reporte '.$reporte->folio.' finalizado',
+            'cuerpo' => "El reporte {$reporte->folio} ha sido finalizado por el técnico. Tipo: {$reporte->tipo}, Categoría: {$reporte->categoria}",
+            'estatus' => 'pendiente',
+            'created_at' => now(),
+        ]);
     }
 }

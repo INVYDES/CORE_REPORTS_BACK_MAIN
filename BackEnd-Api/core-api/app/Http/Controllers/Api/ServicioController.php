@@ -58,10 +58,10 @@ class ServicioController extends Controller
         $data['area_id'] = $this->validatedDependenciaId($request, 'area_id', \App\Models\Area::class);
         $data['equipo_id'] = $this->validatedDependenciaId($request, 'equipo_id', \App\Models\Equipo::class);
 
-        $data['folio'] = $data['folio'] ?? \App\Models\Servicio::generarFolio($request->user()->dependencia_id);
         $data['estatus'] = $data['estatus'] ?? 'programado';
 
-        $servicio = \App\Models\Servicio::create($data);
+        // Folio correlativo y alta en la misma transacción (ver GeneraFolio).
+        $servicio = \App\Models\Servicio::createConFolio($data, $this->usuario($request)->dependencia_id);
 
         return response()->json($servicio->load(['asignado', 'area', 'equipo']), 201);
     }

@@ -37,7 +37,9 @@ services:
     build:
       context: ./BackEnd-Api/core-api
       dockerfile: Dockerfile
-    environment: *backend-env
+    environment:
+      <<: *backend-env
+      CONTAINER_ROLE: web
     ports:
       - "8000:8000"
     depends_on:
@@ -55,14 +57,16 @@ services:
     build:
       context: ./BackEnd-Api/core-api
       dockerfile: Dockerfile
-    environment: *backend-env
+    environment:
+      <<: *backend-env
+      CONTAINER_ROLE: worker
+      RUN_MIGRATIONS: "false"
     depends_on:
       db:
         condition: service_healthy
     volumes:
       - ./BackEnd-Api/core-api:/var/www/html
       - backend_storage:/var/www/html/storage
-    entrypoint: ["sh", "-c", "php artisan queue:work --sleep=2 --tries=3 --timeout=0 & php artisan schedule:work & wait"]
     restart: unless-stopped
 
   frontend:

@@ -45,7 +45,7 @@ export default {
             // Asset obsoleto detectado: cargamos la app fresca
             sessionStorage.removeItem('token');
             window.location.replace('/');
-          <\/script>
+          </script>
         </head><body>Actualizando aplicación...</body></html>`,
         {
           status: 200,

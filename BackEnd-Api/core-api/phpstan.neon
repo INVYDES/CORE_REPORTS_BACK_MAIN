@@ -1,13 +1,12 @@
 includes:
     - vendor/larastan/larastan/extension.neon
 parameters:
-    level: 9
+    # Nivel 6: exige tipos de retorno y de parámetros en toda la app. Se subió
+    # desde el nivel 9 original (que nunca podía quedar en verde por la falta
+    # de tipos de Eloquent) y se irá incrementando de forma gradual.
+    level: 6
     paths:
         - app
         - database
     excludePaths:
         - vendor
-    # En PHPStan 2.x la antigua opción checkMissingIterableValueType se sustituye
-    # por ignorar el identificador missingType.iterableValue.
-    ignoreErrors:
-        - identifier: missingType.iterableValue

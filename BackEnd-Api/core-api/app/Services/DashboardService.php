@@ -5,10 +5,12 @@ namespace App\Services;
 use App\Models\Reporte;
 use App\Models\Servicio;
 use App\Models\Ticket;
+use Illuminate\Database\Eloquent\Collection;
 
 class DashboardService
 {
-    public function ticketsPorAsignar(int $dependenciaId, int $limit = 5)
+    /** @return Collection<int, Ticket> */
+    public function ticketsPorAsignar(int $dependenciaId, int $limit = 5): Collection
     {
         return Ticket::withoutGlobalScope(\App\Scopes\DependenciaScope::class)
             ->where('dependencia_id', $dependenciaId)
@@ -18,7 +20,8 @@ class DashboardService
             ->limit($limit)->get();
     }
 
-    public function serviciosProximos(int $dependenciaId, int $limit = 5)
+    /** @return Collection<int, Servicio> */
+    public function serviciosProximos(int $dependenciaId, int $limit = 5): Collection
     {
         return Servicio::withoutGlobalScope(\App\Scopes\DependenciaScope::class)
             ->where('dependencia_id', $dependenciaId)
@@ -27,7 +30,8 @@ class DashboardService
             ->limit($limit)->get();
     }
 
-    public function actividadReciente(int $dependenciaId, int $limit = 5)
+    /** @return Collection<int, Reporte> */
+    public function actividadReciente(int $dependenciaId, int $limit = 5): Collection
     {
         return Reporte::withoutGlobalScope(\App\Scopes\DependenciaScope::class)
             ->where('dependencia_id', $dependenciaId)

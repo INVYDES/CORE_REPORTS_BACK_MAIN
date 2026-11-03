@@ -6,13 +6,14 @@ use App\Http\Controllers\Controller;
 use App\Models\Reporte;
 use App\Models\Servicio;
 use App\Models\Ticket;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class HistoryController extends Controller
 {
-    public function index(Request $request)
+    public function index(Request $request): JsonResponse
     {
-        $depId = $request->user()->dependencia_id;
+        $depId = $this->usuario($request)->dependencia_id;
         $from = $request->query('from');
         $to = $request->query('to');
         $tipo = $request->query('tipo'); // ticket|servicio|reporte

@@ -25,7 +25,20 @@ describe('authStore', () => {
 
   it('login establece token, usuario y cookie, y logout la limpia', async () => {
     const client = (await import('../api/client')).default as any
-    client.post.mockResolvedValue({ data: { user: { id: 1, dependencia_id: 1, rol: 1, nombre: 'Admin', apellidos: 'Tec', email: 'a@b.com', estado: true }, token: 'abc123' } })
+    client.post.mockResolvedValue({
+      data: {
+        user: {
+          id: 1,
+          dependencia_id: 1,
+          rol: 1,
+          nombre: 'Admin',
+          apellidos: 'Tec',
+          email: 'a@b.com',
+          estado: true,
+        },
+        token: 'abc123',
+      },
+    })
     const store = useAuthStore()
     const user = await store.login('a@b.com', 'password')
     expect(user.email).toBe('a@b.com')
@@ -51,7 +64,20 @@ describe('authStore', () => {
 
   it('hasRole e isAdmin reflejan el rol del usuario', async () => {
     const client = (await import('../api/client')).default as any
-    client.post.mockResolvedValue({ data: { user: { id: 2, dependencia_id: 1, rol: ROLES.ADMIN_COM, nombre: 'A', apellidos: 'C', email: 'ac@b.com', estado: true }, token: 't2' } })
+    client.post.mockResolvedValue({
+      data: {
+        user: {
+          id: 2,
+          dependencia_id: 1,
+          rol: ROLES.ADMIN_COM,
+          nombre: 'A',
+          apellidos: 'C',
+          email: 'ac@b.com',
+          estado: true,
+        },
+        token: 't2',
+      },
+    })
     const store = useAuthStore()
     await store.login('ac@b.com', 'password')
 
@@ -62,7 +88,20 @@ describe('authStore', () => {
 
   it('logout limpia la sesión', async () => {
     const client = (await import('../api/client')).default as any
-    client.post.mockResolvedValueOnce({ data: { user: { id: 3, dependencia_id: 1, rol: 3, nombre: 'T', apellidos: 'U', email: 't@b.com', estado: true }, token: 't3' } })
+    client.post.mockResolvedValueOnce({
+      data: {
+        user: {
+          id: 3,
+          dependencia_id: 1,
+          rol: 3,
+          nombre: 'T',
+          apellidos: 'U',
+          email: 't@b.com',
+          estado: true,
+        },
+        token: 't3',
+      },
+    })
     client.post.mockResolvedValueOnce({ data: {} })
     const store = useAuthStore()
     await store.login('t@b.com', 'password')

@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\DependenciaController;
 use App\Http\Controllers\Api\EmpresaController;
 use App\Http\Controllers\Api\EncuestaController;
 use App\Http\Controllers\Api\EquipoController;
+use App\Http\Controllers\Api\EvidenciaController;
 use App\Http\Controllers\Api\HistoryController;
 use App\Http\Controllers\Api\LicenciaController;
 use App\Http\Controllers\Api\MaterialController;
@@ -38,6 +39,11 @@ Route::prefix('v1')->group(function () {
     // Catálogo de licencias: público
     Route::get('/licencias/disponibles', [LicenciaController::class, 'disponibles']);
 
+    // Documentos de evidencias: acceso mediante URL firmada temporal.
+    Route::get('evidencias/{evidencia}/documento', [EvidenciaController::class, 'documento'])
+        ->middleware('signed')
+        ->name('evidencias.documento');
+
     // API autenticada
     Route::middleware(['auth:sanctum', 'dependencia', 'licencia'])->group(function () {
         Route::get('/me', [AuthController::class, 'me']);
@@ -56,6 +62,7 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('tickets', TicketController::class);
         Route::patch('tickets/{ticket}/asignar', [TicketController::class, 'asignar']);
         Route::apiResource('servicios', ServicioController::class);
+        Route::get('reportes/export', [ReporteController::class, 'export']);
         Route::apiResource('reportes', ReporteController::class);
         Route::patch('reportes/{reporte}/conformidad', [ReporteController::class, 'conformidad']);
         Route::get('reportes/{reporte}/pdf', [ReporteController::class, 'pdf']);
@@ -112,4 +119,5 @@ Route::middleware(['auth:sanctum', 'dependencia', 'licencia'])->group(function (
     Route::post('empresa/logo', [EmpresaController::class, 'uploadLogo']);
     Route::get('tecnicos', [TicketController::class, 'tecnicos']);
     Route::get('encuestas/{idReporte}', [EncuestaController::class, 'porReporte']);
+    Route::get('reportes/export', [ReporteController::class, 'export']);
 });

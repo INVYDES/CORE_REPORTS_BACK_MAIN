@@ -16,7 +16,7 @@ class HealthController extends Controller
             'queue' => $this->checkQueue(),
         ];
 
-        $saludable = ! in_array(false, $checks, true);
+        $saludable = collect($checks)->every(fn (array $check): bool => ($check['ok'] ?? false) === true);
 
         return response()->json([
             'status' => $saludable ? 'ok' : 'degraded',
@@ -30,7 +30,8 @@ class HealthController extends Controller
         ], $saludable ? 200 : 503);
     }
 
-    private function checkDb(): bool|array
+    /** @return array<string, mixed> */
+    private function checkDb(): array
     {
         try {
             DB::select('select 1');
@@ -43,7 +44,8 @@ class HealthController extends Controller
         }
     }
 
-    private function checkCache(): bool|array
+    /** @return array<string, mixed> */
+    private function checkCache(): array
     {
         try {
             $key = 'health:'.uniqid();
@@ -57,7 +59,8 @@ class HealthController extends Controller
         }
     }
 
-    private function checkQueue(): bool|array
+    /** @return array<string, mixed> */
+    private function checkQueue(): array
     {
         try {
             $driver = config('queue.default');

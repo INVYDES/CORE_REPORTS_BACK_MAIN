@@ -1,9 +1,9 @@
-FROM php:8.2-cli
+FROM php:8.5-cli
 
 # System deps (added netcat for DB health check)
 RUN apt-get update && apt-get install -y \
     git curl libpng-dev libonig-dev libxml2-dev libzip-dev zip unzip \
-    default-mysql-client libfreetype6-dev libjpeg62-turbo-dev libwebp-dev netcat-openbsd \
+    default-mysql-client libfreetype6-dev libjpeg62-turbo-dev libwebp-dev netcat-openbsd supervisor \
     && docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
     && docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd zip \
     && pecl install redis && docker-php-ext-enable redis \
@@ -20,6 +20,10 @@ RUN composer install --no-dev --no-scripts --no-autoloader --prefer-dist --ignor
      composer update --no-dev --no-scripts --no-autoloader --prefer-dist --no-interaction --with-all-dependencies)
 
 COPY . .
+
+# Runtime: web + queue worker + scheduler bajo supervisor (ver entrypoint.sh)
+COPY docker/supervisor/supervisord.conf /etc/supervisor/supervisord.conf
+COPY docker/supervisor/conf.d/ /etc/supervisor/conf.d/
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh \

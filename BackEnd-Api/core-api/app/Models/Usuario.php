@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\RolUsuario;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
@@ -10,8 +11,28 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
+/**
+ * @property int $id
+ * @property int $dependencia_id
+ * @property string|null $numero_empleado
+ * @property int $rol
+ * @property string $nombre
+ * @property string $apellidos
+ * @property string $email
+ * @property \Illuminate\Support\Carbon|null $email_verified_at
+ * @property string $password
+ * @property bool $estado
+ * @property \Illuminate\Support\Carbon|null $ultimo_acceso
+ * @property string|null $remember_token
+ * @property string|null $current_device
+ * @property \Illuminate\Support\Carbon|null $created_at
+ * @property \Illuminate\Support\Carbon|null $updated_at
+ * @property \Illuminate\Support\Carbon|null $deleted_at
+ * @property-read Dependencia|null $dependencia
+ */
 class Usuario extends Authenticatable
 {
+    /** @use HasFactory<\Illuminate\Database\Eloquent\Factories\Factory<static>> */
     use HasApiTokens, HasFactory, Notifiable, SoftDeletes;
 
     /** Constantes de rol (espejo del enum RolUsuario). */
@@ -55,6 +76,7 @@ class Usuario extends Authenticatable
         return $this->email;
     }
 
+    /** @return BelongsTo<Dependencia, $this> */
     public function dependencia(): BelongsTo
     {
         return $this->belongsTo(Dependencia::class, 'dependencia_id');
@@ -90,20 +112,35 @@ class Usuario extends Authenticatable
         return $this->rol === RolUsuario::Cliente->value;
     }
 
-    /** Solo usuarios activos. */
-    public function scopeActivos($query)
+    /**
+     * Solo usuarios activos.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
+     */
+    public function scopeActivos(Builder $query): Builder
     {
         return $query->where('estado', true);
     }
 
-    /** Filtra por uno o varios roles. */
-    public function scopeByRole($query, int ...$roles)
+    /**
+     * Filtra por uno o varios roles.
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
+     */
+    public function scopeByRole(Builder $query, int ...$roles): Builder
     {
         return $query->whereIn('rol', $roles);
     }
 
-    /** Usuarios de rol administrativo (técnico o comercial). */
-    public function scopeAdmins($query)
+    /**
+     * Usuarios de rol administrativo (técnico o comercial).
+     *
+     * @param  Builder<static>  $query
+     * @return Builder<static>
+     */
+    public function scopeAdmins(Builder $query): Builder
     {
         return $query->whereIn('rol', [self::ROLE_ADMIN_TEC, self::ROLE_ADMIN_COM]);
     }

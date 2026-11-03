@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Dependencia;
 use App\Models\Suscripcion;
 use App\Services\LicenciaService;
+use App\Support\PagoReferencia;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -64,10 +65,10 @@ class LicenciaController extends Controller
 
     public function comprarLicenciaMercadoPago(Request $request, int $licenciaId): JsonResponse
     {
-        $user = $request->user();
+        $user = $this->usuario($request);
         $dependencia = $user->dependencia;
 
-        if (! $dependencia) {
+        if (! $dependencia instanceof Dependencia) {
             return response()->json(['success' => false, 'message' => 'Dependencia no encontrada'], 404);
         }
 
@@ -81,15 +82,23 @@ class LicenciaController extends Controller
             ? (float) $licencia->precio_anual
             : (float) $licencia->precio;
 
-        // Trial: activación directa sin pasarela
+        // Trial: activación directa sin pasarela, pero solo si la dependencia
+        // no consumió ya su periodo de prueba.
         if ($precio == 0 || $licencia->tipo === 'trial') {
+            if (! $this->licencias->puedeActivarTrial($dependencia)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'El periodo de prueba ya fue utilizado. Elige un plan de pago.',
+                ], 422);
+            }
+
             $this->licencias->activarLicencia($dependencia, $licencia, 'trial', 0);
 
             return response()->json(['success' => true, 'message' => 'Licencia trial activada', 'pasarela' => 'none']);
         }
 
         try {
-            $frontendUrl = rtrim(config('app.frontend_url', env('FRONTEND_URL', '')), '/');
+            $frontendUrl = rtrim((string) config('app.frontend_url'), '/');
 
             $preference = (new PreferenceClient)->create([
                 'items' => [[
@@ -162,31 +171,23 @@ class LicenciaController extends Controller
                 return response()->json(['status' => 'ok'], 200);
             }
 
-            $payment = (new PaymentClient)->get((string) $paymentId);
+            $payment = (new PaymentClient)->get((int) $paymentId);
 
-            if (! $payment || $payment->status !== 'approved') {
+            if ($payment->status !== 'approved') {
                 return response()->json(['status' => 'ok'], 200);
             }
 
-            $reference = $payment->external_reference ?? '';
-            if (! str_starts_with($reference, 'CS-')) {
-                Log::warning('Referencia MP desconocida', ['ref' => $reference]);
+            $referencia = PagoReferencia::parsear($payment->external_reference ?? null);
 
-                return response()->json(['status' => 'ok'], 200);
-            }
-
-            $parts = explode('-', $reference);
-            if (count($parts) !== 3) {
-                Log::error('Formato de referencia inválido', ['ref' => $reference]);
+            if ($referencia === null) {
+                Log::warning('Referencia MP desconocida', ['ref' => $payment->external_reference ?? '']);
 
                 return response()->json(['status' => 'ok'], 200);
             }
 
-            [, $licenciaId, $dependenciaId] = $parts;
-
-            $dependencia = Dependencia::find((int) $dependenciaId);
+            $dependencia = Dependencia::find($referencia['dependencia']);
             if (! $dependencia) {
-                Log::error('Webhook MP: dependencia inexistente', ['id' => $dependenciaId]);
+                Log::error('Webhook MP: dependencia inexistente', ['id' => $referencia['dependencia']]);
 
                 return response()->json(['status' => 'ok'], 200);
             }
@@ -197,9 +198,9 @@ class LicenciaController extends Controller
                 return response()->json(['status' => 'ok'], 200);
             }
 
-            $licencia = $this->licencias->resolverLicencia((int) $licenciaId);
+            $licencia = $this->licencias->resolverLicencia($referencia['licencia']);
             if ($licencia === null) {
-                Log::error('Webhook MP: licencia inexistente', ['id' => $licenciaId]);
+                Log::error('Webhook MP: licencia inexistente', ['id' => $referencia['licencia']]);
 
                 return response()->json(['status' => 'ok'], 200);
             }
@@ -225,9 +226,13 @@ class LicenciaController extends Controller
     public function verificarPagoMercadoPago(Request $request, string $paymentId): JsonResponse
     {
         try {
-            $payment = (new PaymentClient)->get($paymentId);
+            $dependenciaId = (int) $this->usuario($request)->dependencia_id;
 
-            if (! $payment) {
+            $payment = (new PaymentClient)->get((int) $paymentId);
+
+            // El pago debe pertenecer a la dependencia del usuario: evita que
+            // una empresa consulte pagos de otra con solo conocer el id.
+            if (! PagoReferencia::perteneceA($payment->external_reference ?? null, $dependenciaId)) {
                 return response()->json(['success' => false, 'message' => 'Pago no encontrado'], 404);
             }
 
@@ -266,6 +271,6 @@ class LicenciaController extends Controller
         $manifest = "id:{$dataId};request-id:{$requestId};";
         $esperada = hash_hmac('sha256', $manifest, $secret);
 
-        return hash_equals($esperada, strtolower(explode(',', $signature)[0] ?? ''));
+        return hash_equals($esperada, strtolower(explode(',', $signature)[0]));
     }
 }

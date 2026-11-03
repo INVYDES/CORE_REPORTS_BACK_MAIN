@@ -11,6 +11,7 @@ class StoreTicketRequest extends FormRequest
         return true; // la autorización de rol la aplica TicketPolicy en el controlador
     }
 
+    /** @return array<string, mixed> */
     public function rules(): array
     {
         return [

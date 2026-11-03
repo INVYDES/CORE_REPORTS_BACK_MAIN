@@ -63,12 +63,12 @@ class TicketController extends Controller
             $this->authorize('assign', Ticket::class);
         }
 
-        $data['folio'] = $data['folio'] ?? Ticket::generarFolio($request->user()->dependencia_id);
         $data['estatus'] = $data['estatus'] ?? 'abierto';
         $data['prioridad'] = $data['prioridad'] ?? 'media';
         $data['fecha_solicitud'] = now();
 
-        $ticket = Ticket::create($data);
+        // Folio correlativo y alta en la misma transacción (ver GeneraFolio).
+        $ticket = Ticket::createConFolio($data, $this->usuario($request)->dependencia_id);
 
         return response()->json($ticket->load(['asignado', 'area', 'equipo']), 201);
     }
@@ -100,19 +100,9 @@ class TicketController extends Controller
             $data['equipo_id'] = $this->validatedDependenciaId($request, 'equipo_id', Equipo::class);
         }
 
-        $estadoAnterior = $ticket->estatus;
+        // El historial de estatus lo registra TicketObserver (registrado en
+        // AppServiceProvider): no se duplica aquí.
         $ticket->update($data);
-
-        // Historial de cambios de estatus
-        if (isset($data['estatus']) && $data['estatus'] !== $estadoAnterior) {
-            $ticket->historial()->create([
-                'dependencia_id' => $ticket->dependencia_id,
-                'estatus_anterior' => $estadoAnterior,
-                'estatus_nuevo' => $data['estatus'],
-                'cambiado_por' => $request->user()->id,
-                'fecha_cambio' => now(),
-            ]);
-        }
 
         return response()->json($ticket->load(['asignado', 'area', 'equipo']));
     }
@@ -138,25 +128,14 @@ class TicketController extends Controller
             return response()->json(['message' => 'El usuario a asignar no existe en tu dependencia.'], 422);
         }
 
-        $ticket = DB::transaction(function () use ($request, $ticket, $usuarioId) {
-            $estatusAnterior = $ticket->estatus;
-
+        $ticket = DB::transaction(function () use ($ticket, $usuarioId) {
+            // TicketObserver registra el historial del cambio de estatus.
             $ticket->update([
                 'usuario_asignado_id' => $usuarioId,
                 'estatus' => $ticket->estatus === 'abierto' ? 'en_proceso' : $ticket->estatus,
             ]);
 
-            if ($ticket->estatus !== $estatusAnterior) {
-                $ticket->historial()->create([
-                    'dependencia_id' => $ticket->dependencia_id,
-                    'estatus_anterior' => $estatusAnterior,
-                    'estatus_nuevo' => $ticket->estatus,
-                    'cambiado_por' => $request->user()->id,
-                    'fecha_cambio' => now(),
-                ]);
-            }
-
-            // Notificación (el correo se envía vía cola / comando, no bloquea la petición)
+            // Notificación: el correo lo envía EnviarNotificacionesPendientes.
             \App\Models\Notificacion::create([
                 'dependencia_id' => $ticket->dependencia_id,
                 'tipo' => 'ticket_asignado',
@@ -181,7 +160,7 @@ class TicketController extends Controller
      */
     public function tecnicos(Request $request): JsonResponse
     {
-        $idEmpresa = $request->user()->dependencia_id ?? $request->user()->id_dependencia;
+        $idEmpresa = $this->usuario($request)->dependencia_id ?? $this->usuario($request)->id_dependencia;
 
         $tecnicos = Usuario::where('dependencia_id', $idEmpresa)
             ->where('estado', true)

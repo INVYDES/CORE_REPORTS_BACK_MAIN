@@ -4,68 +4,69 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Services\AnalyticsService;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 class AnalyticsController extends Controller
 {
-    public function sla(Request $r, AnalyticsService $svc)
+    public function sla(Request $r, AnalyticsService $svc): JsonResponse
     {
-        return response()->json($svc->cumplimientoSla($r->user()->dependencia_id, $r->from, $r->to));
+        return response()->json($svc->cumplimientoSla($this->usuario($r)->dependencia_id, $r->from, $r->to));
     }
 
-    public function mttr(Request $r, AnalyticsService $svc)
+    public function mttr(Request $r, AnalyticsService $svc): JsonResponse
     {
-        return response()->json($svc->mttr($r->user()->dependencia_id, $r->from, $r->to));
+        return response()->json($svc->mttr($this->usuario($r)->dependencia_id, $r->from, $r->to));
     }
 
-    public function horasHombre(Request $r, AnalyticsService $svc)
+    public function horasHombre(Request $r, AnalyticsService $svc): JsonResponse
     {
-        return response()->json($svc->horasHombre($r->user()->dependencia_id, $r->from, $r->to));
+        return response()->json($svc->horasHombre($this->usuario($r)->dependencia_id, $r->from, $r->to));
     }
 
-    public function horasPorTecnico(Request $r, AnalyticsService $svc)
+    public function horasPorTecnico(Request $r, AnalyticsService $svc): JsonResponse
     {
-        return response()->json($svc->horasPorTecnico($r->user()->dependencia_id));
+        return response()->json($svc->horasPorTecnico($this->usuario($r)->dependencia_id));
     }
 
-    public function retrabajos(Request $r, AnalyticsService $svc)
+    public function retrabajos(Request $r, AnalyticsService $svc): JsonResponse
     {
-        return response()->json($svc->retrabajos($r->user()->dependencia_id));
+        return response()->json($svc->retrabajos($this->usuario($r)->dependencia_id));
     }
 
-    public function categoria(Request $r, AnalyticsService $svc)
+    public function categoria(Request $r, AnalyticsService $svc): JsonResponse
     {
-        return response()->json($svc->distribucionCategoria($r->user()->dependencia_id));
+        return response()->json($svc->distribucionCategoria($this->usuario($r)->dependencia_id));
     }
 
-    public function tiempos(Request $r, AnalyticsService $svc)
+    public function tiempos(Request $r, AnalyticsService $svc): JsonResponse
     {
-        return response()->json($svc->tiemposOperativos($r->user()->dependencia_id));
+        return response()->json($svc->tiemposOperativos($this->usuario($r)->dependencia_id));
     }
 
-    public function volumen(Request $r, AnalyticsService $svc)
+    public function volumen(Request $r, AnalyticsService $svc): JsonResponse
     {
-        return response()->json($svc->volumenOperacion($r->user()->dependencia_id));
+        return response()->json($svc->volumenOperacion($this->usuario($r)->dependencia_id));
     }
 
-    public function eficacia(Request $r, AnalyticsService $svc)
+    public function eficacia(Request $r, AnalyticsService $svc): JsonResponse
     {
-        return response()->json($svc->eficaciaCalidad($r->user()->dependencia_id));
+        return response()->json($svc->eficaciaCalidad($this->usuario($r)->dependencia_id));
     }
 
-    public function proactivoReactivo(Request $r, AnalyticsService $svc)
+    public function proactivoReactivo(Request $r, AnalyticsService $svc): JsonResponse
     {
-        return response()->json($svc->proactivoReactivo($r->user()->dependencia_id));
+        return response()->json($svc->proactivoReactivo($this->usuario($r)->dependencia_id));
     }
 
-    public function conteo(Request $r, AnalyticsService $svc)
+    public function conteo(Request $r, AnalyticsService $svc): JsonResponse
     {
-        return response()->json($svc->conteoOperacion($r->user()->dependencia_id));
+        return response()->json($svc->conteoOperacion($this->usuario($r)->dependencia_id));
     }
 
-    public function all(Request $r, AnalyticsService $svc)
+    public function all(Request $r, AnalyticsService $svc): JsonResponse
     {
-        $dep = $r->user()->dependencia_id;
+        $dep = $this->usuario($r)->dependencia_id;
 
         return response()->json([
             'sla' => $svc->cumplimientoSla($dep, $r->from, $r->to),

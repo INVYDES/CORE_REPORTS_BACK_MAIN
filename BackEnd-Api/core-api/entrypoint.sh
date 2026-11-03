@@ -1,10 +1,30 @@
 #!/bin/sh
 set -e
 
-# Cloud Run sets PORT (default 8080). Local docker-compose uses 8000.
+# Cloud Run/Railway sets PORT (default 8080). Local docker-compose uses 8000.
 PORT_TO_USE=${PORT:-8000}
+export PORT="$PORT_TO_USE"
 
-echo "Starting CsRecords API on port $PORT_TO_USE"
+# Numero de procesos del servidor embebido de PHP. Se exporta para que los
+# procesos hijos de supervisord lo hereden (PHP_CLI_SERVER_WORKERS).
+export PHP_CLI_SERVER_WORKERS="${WEB_WORKERS:-4}"
+
+# Rol del contenedor:
+#   web        -> solo servidor HTTP
+#   worker     -> worker de cola + scheduler (sin HTTP)
+#   scheduler  -> solo scheduler
+#   all        -> los tres procesos en este contenedor (por defecto)
+ROLE=${CONTAINER_ROLE:-all}
+
+case "$ROLE" in
+  web|worker|scheduler|all) ;;
+  *)
+    echo "CONTAINER_ROLE invalido: '$ROLE' (usa web, worker, scheduler o all)" >&2
+    exit 1
+    ;;
+esac
+
+echo "Starting CsRecords API (role=$ROLE, port=$PORT_TO_USE)"
 echo "APP_ENV=${APP_ENV} DB_HOST=${DB_HOST} DB_DATABASE=${DB_DATABASE} DB_USERNAME=${DB_USERNAME}"
 
 # Ensure storage perms (Cloud Run runs as www-data)
@@ -20,27 +40,59 @@ else
   php artisan config:clear || true
 fi
 
-# Run migrations with retry (up to 5 times, 5s between)
-echo "Running migrations..."
-for i in 1 2 3 4 5; do
-  if php artisan migrate --force; then
-    echo "Migrations OK"
-    break
-  fi
-  echo "Migrate attempt $i failed, retrying in 5s..."
-  sleep 5
-  if [ "$i" = "5" ]; then
-    echo "WARNING: migrations failed after 5 attempts, continuing startup"
-  fi
-done
+# Las migraciones corren una sola vez: en el rol web (o "all"). Los demas
+# procesos esperan a que la tabla exista y se reinician solos si fallan.
+if [ "$ROLE" = "web" ] || [ "$ROLE" = "all" ]; then
+  if [ "${RUN_MIGRATIONS:-true}" = "true" ]; then
+    echo "Running migrations..."
+    for i in 1 2 3 4 5; do
+      if php artisan migrate --force; then
+        echo "Migrations OK"
+        break
+      fi
+      echo "Migrate attempt $i failed, retrying in 5s..."
+      sleep 5
+      if [ "$i" = "5" ]; then
+        echo "WARNING: migrations failed after 5 attempts, continuing startup"
+      fi
+    done
 
-# Seed only if fresh DB (optional: set RUN_SEED=true)
-if [ "$RUN_SEED" = "true" ]; then
-  php artisan db:seed --class=CoreReportsSeeder --force || echo "Seed failed"
+    # Seed only if fresh DB (optional: set RUN_SEED=true)
+    if [ "$RUN_SEED" = "true" ]; then
+      php artisan db:seed --class=CoreReportsSeeder --force || echo "Seed failed"
+    fi
+  fi
+
+  # Warm up storage link
+  php artisan storage:link 2>/dev/null || true
 fi
 
-# Warm up storage link
-php artisan storage:link 2>/dev/null || true
+# Selecciona los programas de supervisor segun el rol. Los archivos van
+# montados en la imagen (/etc/supervisor/conf.d) y se apartan aqui.
+SUPERVISOR_DIR=/etc/supervisor/conf.d
+DISABLED_DIR=/tmp/supervisor-disabled
+mkdir -p "$DISABLED_DIR"
 
-echo "Launching php artisan serve --host=0.0.0.0 --port=$PORT_TO_USE"
-exec php artisan serve --host=0.0.0.0 --port="$PORT_TO_USE"
+disable_program() {
+  if [ -f "$SUPERVISOR_DIR/$1.conf" ]; then
+    mv "$SUPERVISOR_DIR/$1.conf" "$DISABLED_DIR/$1.conf"
+  fi
+}
+
+case "$ROLE" in
+  web)
+    disable_program queue
+    disable_program scheduler
+    ;;
+  worker)
+    disable_program web
+    ;;
+  scheduler)
+    disable_program web
+    disable_program queue
+    ;;
+  all) ;;
+esac
+
+echo "Supervisord programs: $(ls "$SUPERVISOR_DIR" 2>/dev/null | tr '\n' ' ')"
+exec supervisord -c /etc/supervisor/supervisord.conf

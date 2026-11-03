@@ -1,45 +1,50 @@
 <script setup lang="ts">
-  import { ref, onMounted, defineAsyncComponent } from 'vue';
-  import { useAuthStore } from '../stores/authStore';
-  import { storeToRefs } from 'pinia';
-  import AppSidebar from '../components/shared/AppSidebar.vue';
-  import AppHeader from '../components/shared/AppHeader.vue';
-  const ReportCreateView = defineAsyncComponent(() => import('../views/admin/reports/ReportCreateView.vue'));
-  const TicketCreateView = defineAsyncComponent(() => import('../views/admin/tickets/TicketCreateView.vue'));
+  import { ref, onMounted, defineAsyncComponent } from 'vue'
+  import { useAuthStore } from '../stores/authStore'
+  import { storeToRefs } from 'pinia'
+  import AppSidebar from '../components/shared/AppSidebar.vue'
+  import AppHeader from '../components/shared/AppHeader.vue'
+  const ReportCreateView = defineAsyncComponent(
+    () => import('../views/admin/reports/ReportCreateView.vue')
+  )
+  const TicketCreateView = defineAsyncComponent(
+    () => import('../views/admin/tickets/TicketCreateView.vue')
+  )
 
-  const authStore = useAuthStore();
-  const { currentUser } = storeToRefs(authStore);
+  const authStore = useAuthStore()
+  const { currentUser } = storeToRefs(authStore)
 
-  const isSidebarOpen = ref(false);
-  const showReportModal = ref(false);
-  const showTicketModal = ref(false);
+  const isSidebarOpen = ref(false)
+  const showReportModal = ref(false)
+  const showTicketModal = ref(false)
 
   onMounted(() => {
     if (!localStorage.getItem('hasVisited')) {
-      isSidebarOpen.value = true;
-      localStorage.setItem('hasVisited', 'true');
+      isSidebarOpen.value = true
+      localStorage.setItem('hasVisited', 'true')
     }
-  });
+  })
 
   const toggleSidebar = () => {
-    isSidebarOpen.value = !isSidebarOpen.value;
-  };
+    isSidebarOpen.value = !isSidebarOpen.value
+  }
 
   const closeSidebar = () => {
-    isSidebarOpen.value = false;
-  };
+    isSidebarOpen.value = false
+  }
 </script>
 
 <template>
   <div class="page-container-app-layout">
     <!-- Overlay for mobile when sidebar is open -->
-    <div 
-      v-if="isSidebarOpen" 
-      class="sidebar-overlay" 
-      @click="closeSidebar"
-    ></div>
+    <div v-if="isSidebarOpen" class="sidebar-overlay" @click="closeSidebar"></div>
 
-    <AppSidebar :is-open="isSidebarOpen" @close="closeSidebar" @openReportModal="showReportModal = true" @openTicketModal="showTicketModal = true" />
+    <AppSidebar
+      :is-open="isSidebarOpen"
+      @close="closeSidebar"
+      @openReportModal="showReportModal = true"
+      @openTicketModal="showTicketModal = true"
+    />
 
     <div class="main-content-wrapper">
       <AppHeader v-if="currentUser?.rol !== 0" @toggle-sidebar="toggleSidebar" />
@@ -55,27 +60,46 @@
       </main>
 
       <Teleport to="body">
-        <div v-if="showReportModal" class="report-modal-overlay" @click.self="showReportModal = false">
+        <div
+          v-if="showReportModal"
+          class="report-modal-overlay"
+          @click.self="showReportModal = false"
+        >
           <div class="report-modal-content">
-            <button class="report-modal-close" @click="showReportModal = false" title="Cerrar">×</button>
+            <button class="report-modal-close" @click="showReportModal = false" title="Cerrar">
+              ×
+            </button>
             <div class="report-modal-body">
-              <ReportCreateView :isModal="true" @close="showReportModal = false" @created="showReportModal = false" />
+              <ReportCreateView
+                :isModal="true"
+                @close="showReportModal = false"
+                @created="showReportModal = false"
+              />
             </div>
           </div>
         </div>
       </Teleport>
 
       <Teleport to="body">
-        <div v-if="showTicketModal" class="report-modal-overlay" @click.self="showTicketModal = false">
-          <div class="report-modal-content" style="max-width: 800px;">
-            <button class="report-modal-close" @click="showTicketModal = false" title="Cerrar">×</button>
+        <div
+          v-if="showTicketModal"
+          class="report-modal-overlay"
+          @click.self="showTicketModal = false"
+        >
+          <div class="report-modal-content" style="max-width: 800px">
+            <button class="report-modal-close" @click="showTicketModal = false" title="Cerrar">
+              ×
+            </button>
             <div class="report-modal-body">
-              <TicketCreateView :isModal="true" @close="showTicketModal = false" @created="showTicketModal = false" />
+              <TicketCreateView
+                :isModal="true"
+                @close="showTicketModal = false"
+                @created="showTicketModal = false"
+              />
             </div>
           </div>
         </div>
       </Teleport>
-
     </div>
   </div>
 </template>
@@ -86,8 +110,8 @@
     min-height: 100dvh;
     height: 100dvh;
     width: 100vw;
-    overflow: hidden; 
-    background-color: #f1f5f9; 
+    overflow: hidden;
+    background-color: #f1f5f9;
     position: relative;
   }
 
@@ -117,7 +141,7 @@
 
   .content-body {
     flex: 1;
-    overflow-y: auto; 
+    overflow-y: auto;
     padding: 2rem;
   }
 
@@ -161,7 +185,7 @@
     max-height: 90vh;
     overflow: hidden;
     position: relative;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
     display: flex;
     flex-direction: column;
   }
@@ -182,13 +206,18 @@
     justify-content: center;
     color: #64748b;
     transition: all 0.2s;
-    &:hover { background: #e2e8f0; color: #0f172a; }
+    &:hover {
+      background: #e2e8f0;
+      color: #0f172a;
+    }
   }
   .report-modal-body {
     overflow-y: auto;
     flex: 1;
     padding: 1.5rem;
-    @media (max-width: 768px) { padding: 1rem; }
+    @media (max-width: 768px) {
+      padding: 1rem;
+    }
   }
 
   @media print {

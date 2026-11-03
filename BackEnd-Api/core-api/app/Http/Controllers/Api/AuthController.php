@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\LoginRequest;
 use App\Models\Dependencia;
+use App\Models\Suscripcion;
 use App\Models\Usuario;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -68,7 +69,10 @@ class AuthController extends Controller
             'lastNamePaternal' => 'required|string|max:100',
             'lastNameMaternal' => 'nullable|string|max:100',
             'phone' => 'nullable|string|max:30',
-            'planType' => 'nullable|in:free,trial,monthly,annual,mensual,anual',
+            // Se acepta por compatibilidad con el formulario, pero el registro
+            // público siempre crea un plan de prueba: los planes de pago solo
+            // se activan por la pasarela (Mercado Pago).
+            'planType' => 'nullable|string|max:20',
         ], [], [
             'companyName' => 'nombre de empresa',
             'email' => 'correo',
@@ -76,32 +80,36 @@ class AuthController extends Controller
         ]);
 
         $dependencia = \DB::transaction(function () use ($data) {
-            $tipoMap = [
-                'free' => 'trial',
-                'trial' => 'trial',
-                'monthly' => 'mensual',
-                'mensual' => 'mensual',
-                'annual' => 'anual',
-                'anual' => 'anual',
-            ];
-            $tipo = $tipoMap[$data['planType'] ?? ''] ?? 'trial';
-
-            $dias = match ($tipo) {
-                'trial' => 7,
-                'mensual' => 30,
-                'anual' => 365,
-            };
+            $dias = 7;
+            $expiracion = now()->addDays($dias)->toDateString();
 
             $dep = Dependencia::create([
                 'nombre' => $data['companyName'],
                 'rfc' => $data['rfc'] ?? null,
-                'tipo_licencia' => $tipo,
-                'fecha_expiracion' => now()->addDays($dias)->toDateString(),
+                'tipo_licencia' => 'trial',
+                'fecha_expiracion' => $expiracion,
                 'limite_usuarios' => 10,
                 'limite_reportes_mensuales' => 100,
                 'correo_contacto' => $data['email'],
                 'telefono' => $data['phone'] ?? null,
                 'activa' => true,
+                // El trial del registro es el único periodo de prueba que
+                // puede consumir la dependencia.
+                'trial_usado_at' => now(),
+            ]);
+
+            // Suscripción inicial: deja registrado el trial para que la
+            // licencia de prueba no pueda reactivarse indefinidamente.
+            Suscripcion::create([
+                'dependencia_id' => $dep->id,
+                'proveedor' => 'registro',
+                'plan' => 'trial',
+                'estado' => 'trial',
+                'limite_usuarios' => 10,
+                'limite_reportes_mensuales' => 100,
+                'fecha_inicio' => now()->toDateString(),
+                'fecha_expiracion' => $expiracion,
+                'renovacion_automatica' => false,
             ]);
 
             $user = Usuario::create([
@@ -135,22 +143,19 @@ class AuthController extends Controller
 
     public function me(Request $request): JsonResponse
     {
-        return response()->json($request->user()->load('dependencia'));
+        return response()->json($this->usuario($request)->load('dependencia'));
     }
 
     public function logout(Request $request): JsonResponse
     {
-        $user = $request->user();
+        $user = $this->usuario($request);
+        $user->currentAccessToken()->delete();
 
-        if ($user) {
-            $request->user()->currentAccessToken()->delete();
-
-            // Con sesiones simultáneas, current_device solo se limpia cuando
-            // ya no queda ninguna sesión abierta para el usuario.
-            if ($user->tokens()->count() === 0) {
-                $user->current_device = null;
-                $user->save();
-            }
+        // Con sesiones simultáneas, current_device solo se limpia cuando
+        // ya no queda ninguna sesión abierta para el usuario.
+        if ($user->tokens()->count() === 0) {
+            $user->current_device = null;
+            $user->save();
         }
 
         return response()->json(['message' => 'logout']);

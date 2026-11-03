@@ -12,7 +12,8 @@ return new class extends Migration
             Schema::create('encuestas', function (Blueprint $table) {
                 $table->id();
                 $table->foreignId('dependencia_id')->constrained('dependencias')->cascadeOnDelete();
-                $table->foreignId('reporte_id')->constrained('reportes')->cascadeOnDelete()->unique();
+                $table->foreignId('reporte_id')->constrained('reportes')->cascadeOnDelete();
+                $table->unique('reporte_id');
                 $table->tinyInteger('calificacion')->unsigned()->comment('1-5');
                 $table->text('comentario')->nullable();
                 $table->string('respondido_por', 150)->nullable()->comment('Nombre del cliente que califica');

@@ -3,21 +3,35 @@ import { mapTicketForBackend, mapServicioForBackend, mapReporteForBackend } from
 
 describe('mapper.js - filtra y mapea payloads para el back', () => {
   it('mapTicketForBackend normaliza prioridad y area_id', () => {
-    const out = mapTicketForBackend({ asunto: 'Falla', prioridad: 'Alta', idSubdependencia: 3, descripcion: 'x' })
+    const out = mapTicketForBackend({
+      asunto: 'Falla',
+      prioridad: 'Alta',
+      idSubdependencia: 3,
+      descripcion: 'x',
+    })
     expect(out.prioridad).toBe('alta')
     expect(out.area_id).toBe(3)
     expect(out.asunto).toBe('Falla')
   })
 
   it('filtra vacíos y recorta', () => {
-    const out = mapTicketForBackend({ asunto: '  Hola  ', solicitante: '', cargo: null, prioridad: 'Media' })
+    const out = mapTicketForBackend({
+      asunto: '  Hola  ',
+      solicitante: '',
+      cargo: null,
+      prioridad: 'Media',
+    })
     expect(out.asunto).toBe('Hola')
     expect(out.solicitante).toBeUndefined()
     expect(out.cargo).toBeUndefined()
   })
 
   it('mapServicioForBackend mapea categoria larga a enum', () => {
-    const out = mapServicioForBackend({ asunto: 'Mant', categoria: 'Mantenimiento Preventivo', fecha_asignacion: '2026-09-05' })
+    const out = mapServicioForBackend({
+      asunto: 'Mant',
+      categoria: 'Mantenimiento Preventivo',
+      fecha_asignacion: '2026-09-05',
+    })
     expect(out.categoria).toBe('preventivo')
   })
 
@@ -49,7 +63,16 @@ describe('mapper.js - filtra y mapea payloads para el back', () => {
 
   it('lanza error si falta origen en reporte no libre', () => {
     expect(() =>
-      mapReporteForBackend({ tipoReporte: 'Ticket', origenDatosId: null, fechaHoraInicio: '2026-09-05T10:00', fechaHoraFin: '2026-09-05T12:00', estatusReporte: 'Abierto / Trabajo Parcial' }, [])
+      mapReporteForBackend(
+        {
+          tipoReporte: 'Ticket',
+          origenDatosId: null,
+          fechaHoraInicio: '2026-09-05T10:00',
+          fechaHoraFin: '2026-09-05T12:00',
+          estatusReporte: 'Abierto / Trabajo Parcial',
+        },
+        []
+      )
     ).toThrow()
   })
 })

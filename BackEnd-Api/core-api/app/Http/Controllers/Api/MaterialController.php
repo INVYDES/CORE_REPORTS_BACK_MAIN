@@ -100,7 +100,7 @@ class MaterialController extends Controller
             $material->dependencia_id,
             $material->id,
             (float) $data['cantidad'],
-            $request->user()->id,
+            $this->usuario($request)->id,
             $data['notas'] ?? null
         );
 

@@ -5,16 +5,17 @@ import { appBase } from '../utils/basePath'
 // VITE_API_URL manda si está definida (build de Cloudflare/Cloud Run).
 // Si no, la API se asume junto al front en la misma base, así el build sirve
 // igual en la raíz del subdominio que en un subdirectorio.
-const rawBase = import.meta.env.VITE_API_URL
-  || (import.meta.env.DEV ? 'http://localhost:8000/api' : `${appBase}api`)
+const rawBase =
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.DEV ? 'http://localhost:8000/api' : `${appBase}api`)
 const baseURL = rawBase.endsWith('/v1') ? rawBase : rawBase.replace(/\/$/, '') + '/v1'
 const client = axios.create({
   baseURL,
   withCredentials: false,
-  headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' }
+  headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
 })
 
-client.interceptors.request.use((config) => {
+client.interceptors.request.use(config => {
   const token = getToken()
   if (token) config.headers.Authorization = `Bearer ${token}`
   return config
@@ -36,8 +37,8 @@ function forzarLogout(): void {
 }
 
 client.interceptors.response.use(
-  (r) => r,
-  async (error) => {
+  r => r,
+  async error => {
     const status = error.response?.status
     if (status === 419) {
       error.response.data = { message: 'Sesión expirada. Recarga la página e intenta de nuevo.' }
@@ -51,7 +52,8 @@ client.interceptors.response.use(
         try {
           // /me con _revalidado: si el token ya era inválido, este request
           // también falla con 401 y cae al else-if -> forzarLogout().
-          revalidando = revalidando ?? client.get('/me', { _revalidado: true } as any).then(() => undefined)
+          revalidando =
+            revalidando ?? client.get('/me', { _revalidado: true } as any).then(() => undefined)
           await revalidando
           return client.request(error.config)
         } catch {

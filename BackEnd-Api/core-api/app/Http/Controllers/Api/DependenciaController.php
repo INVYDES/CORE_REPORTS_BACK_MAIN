@@ -16,18 +16,26 @@ class DependenciaController extends Controller
     public function index(Request $request): JsonResponse
     {
         return response()->json(
-            Dependencia::where('id', $request->user()->dependencia_id)->paginate(min((int) $request->get('per_page', 15), 100))
+            Dependencia::where('id', $this->usuario($request)->dependencia_id)->paginate(min((int) $request->get('per_page', 15), 100))
         );
     }
 
     public function show(Request $request): JsonResponse
     {
-        return response()->json($request->user()->dependencia);
+        return response()->json($this->usuario($request)->dependencia);
     }
 
     public function update(Request $request): JsonResponse
     {
-        $dependencia = $request->user()->dependencia;
+        // Solo administradores (técnico o comercial) editan datos fiscales y
+        // de contacto de la empresa.
+        if (! in_array((int) $this->usuario($request)->rol, [1, 2], true)) {
+            return response()->json([
+                'message' => 'No tienes permisos para modificar los datos de la empresa.',
+            ], 403);
+        }
+
+        $dependencia = $this->usuario($request)->dependencia;
 
         if (! $dependencia) {
             return response()->json(['message' => 'Dependencia no encontrada'], 404);

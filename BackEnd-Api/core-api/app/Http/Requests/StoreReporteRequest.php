@@ -11,6 +11,7 @@ class StoreReporteRequest extends FormRequest
         return true; // ReportePolicy::create se aplica en el controlador
     }
 
+    /** @return array<string, mixed> */
     public function rules(): array
     {
         return [
@@ -41,6 +42,14 @@ class StoreReporteRequest extends FormRequest
             'materiales' => 'sometimes|array',
             'materiales.*.material_id' => 'required_with:materiales|integer',
             'materiales.*.cantidad' => 'required_with:materiales|numeric|min:0.01',
+
+            // Evidencias: fotografias (imagenes) y documentacion (PDF/Excel/CSV).
+            // El limite por archivo es 10 MB; las imagenes ademas se validan en
+            // el controlador para no superar 5 MB.
+            'evidencias' => 'sometimes|array|max:20',
+            'evidencias.*' => 'file|mimes:jpg,jpeg,png,gif,webp,pdf,csv,xls,xlsx|max:10240',
+            'evidenciaFotografica' => 'sometimes|array|max:20',
+            'evidenciaFotografica.*' => 'string',
         ];
     }
 
@@ -51,6 +60,9 @@ class StoreReporteRequest extends FormRequest
             'tipo.in' => 'El tipo debe ser ticket, servicio o libre.',
             'fecha_fin.after' => 'La fecha de fin debe ser posterior a la de inicio.',
             'materiales.*.cantidad.min' => 'La cantidad de material debe ser mayor a cero.',
+            'evidencias.max' => 'Puedes adjuntar como maximo 20 archivos.',
+            'evidencias.*.mimes' => 'Solo se permiten imagenes (JPG, PNG, GIF, WebP), PDF, CSV, XLS o XLSX.',
+            'evidencias.*.max' => 'Cada archivo debe pesar como maximo 10 MB.',
         ];
     }
 }

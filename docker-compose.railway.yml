@@ -24,13 +24,18 @@ x-railway-env: &railway-env
 
 services:
   backend:
-    environment: *railway-env
+    environment:
+      <<: *railway-env
+      CONTAINER_ROLE: web
     depends_on: []  # sin db local
     # entrypoint ya hace migrate --force con reintentos
     # Si quieres forzar seed en primera carga: RUN_SEED=true docker compose -f ... up
 
   worker:
-    environment: *railway-env
+    environment:
+      <<: *railway-env
+      CONTAINER_ROLE: worker
+      RUN_MIGRATIONS: "false"
     depends_on: []
 
   # db local deshabilitado cuando usas este override

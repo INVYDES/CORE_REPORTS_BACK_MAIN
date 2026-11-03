@@ -55,7 +55,7 @@ class EncuestaController extends Controller
                 'dependencia_id' => $reporte->dependencia_id,
                 'calificacion' => $califGuardar,
                 'comentario' => $comentario,
-                'respondido_por' => $respondidoPor ?? trim($request->user()->nombre.' '.$request->user()->apellidos),
+                'respondido_por' => $respondidoPor ?? trim($this->usuario($request)->nombre.' '.$this->usuario($request)->apellidos),
                 'created_at' => now(),
             ]
         );
@@ -84,7 +84,7 @@ class EncuestaController extends Controller
     /**
      * GET /api/v1/encuestas/reporte/{idReporte} o /api/encuestas/{idReporte}
      */
-    public function porReporte(Request $request, $idReporte): JsonResponse
+    public function porReporte(Request $request, int $idReporte): JsonResponse
     {
         $encuesta = Encuesta::where('reporte_id', $idReporte)->first();
 

@@ -28,6 +28,9 @@ return [
 
     'uploads' => env('FILESYSTEM_UPLOADS_DISK', 'public'),
 
+    // Minutos de validez de las URLs firmadas para documentos privados.
+    'signed_url_ttl' => (int) env('UPLOADS_SIGNED_URL_TTL', 60),
+
     /*
     |--------------------------------------------------------------------------
     | Filesystem Disks
@@ -69,6 +72,31 @@ return [
             'url' => env('AWS_URL'),
             'endpoint' => env('AWS_ENDPOINT'),
             'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
+            'throw' => false,
+            'report' => false,
+        ],
+
+        // IONOS Cloud Object Storage: API compatible con S3.
+        // Se usa para logotipos, fotografias y documentos cuando
+        // FILESYSTEM_UPLOADS_DISK=ionos. Buckets en eu-central-1 (Frankfurt)
+        // por defecto; el endpoint y la region son configurables.
+        'ionos' => [
+            'driver' => 's3',
+            'key' => env('IONOS_S3_ACCESS_KEY'),
+            'secret' => env('IONOS_S3_SECRET_KEY'),
+            'region' => env('IONOS_S3_REGION', 'eu-central-1'),
+            'bucket' => env('IONOS_S3_BUCKET'),
+            'endpoint' => env(
+                'IONOS_S3_ENDPOINT',
+                'https://s3.'.env('IONOS_S3_REGION', 'eu-central-1').'.ionoscloud.com'
+            ),
+            // Dominio publico del bucket (custom domain o CNAME). Si esta vacio
+            // se construye la URL virtual-host-style contra el endpoint.
+            'url' => env('IONOS_S3_PUBLIC_URL'),
+            'use_path_style_endpoint' => env('IONOS_S3_USE_PATH_STYLE_ENDPOINT', false),
+            // Los documentos se guardan privados y se sirven con URL firmada;
+            // las imagenes se guardan explicitamente con visibilidad publica.
+            'visibility' => 'private',
             'throw' => false,
             'report' => false,
         ],

@@ -6,6 +6,15 @@ use App\Traits\BelongsToDependencia;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+/**
+ * @property int $id
+ * @property int $dependencia_id
+ * @property int $ticket_id
+ * @property string|null $estatus_anterior
+ * @property string|null $estatus_nuevo
+ * @property int $cambiado_por
+ * @property \Illuminate\Support\Carbon|null $fecha_cambio
+ */
 class TicketHistorial extends Model
 {
     use BelongsToDependencia;
@@ -18,11 +27,13 @@ class TicketHistorial extends Model
 
     protected $casts = ['fecha_cambio' => 'datetime'];
 
+    /** @return BelongsTo<Ticket, $this> */
     public function ticket(): BelongsTo
     {
         return $this->belongsTo(Ticket::class, 'ticket_id');
     }
 
+    /** @return BelongsTo<Usuario, $this> */
     public function usuario(): BelongsTo
     {
         return $this->belongsTo(Usuario::class, 'cambiado_por');

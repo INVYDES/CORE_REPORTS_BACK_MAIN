@@ -2,6 +2,7 @@
 
 namespace App\Traits;
 
+use App\Models\Usuario;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 
@@ -15,13 +16,25 @@ use Illuminate\Http\Request;
  */
 trait EnsuresDependencia
 {
+    /** Usuario autenticado con el tipo concreto del proyecto. */
+    protected function usuarioActual(): Usuario
+    {
+        $user = auth()->user();
+
+        if (! $user instanceof Usuario) {
+            abort(401, 'No autenticado.');
+        }
+
+        return $user;
+    }
+
     /**
      * Aborta si el modelo no pertenece a la dependencia del usuario autenticado.
      * Con el global scope activo es defensa en profundidad; nunca debe fallar.
      */
     protected function ensureOwnDependencia(Model $model): void
     {
-        if ($model->dependencia_id !== auth()->user()->dependencia_id) {
+        if ($model->getAttribute('dependencia_id') !== $this->usuarioActual()->dependencia_id) {
             abort(403, 'El recurso no pertenece a tu dependencia.');
         }
     }
@@ -38,8 +51,10 @@ trait EnsuresDependencia
             return null;
         }
 
-        // find() ya aplica DependenciaScope: si existe, es de esta dependencia.
-        $found = $modelClass::find((int) $id);
+        // El filtro explícito cubre modelos sin DependenciaScope (Usuario),
+        // que de otro modo permitirían referenciar registros de otra empresa.
+        $found = $modelClass::where('dependencia_id', $this->usuarioActual()->dependencia_id)
+            ->find((int) $id);
 
         if ($found === null) {
             abort(422, "El campo {$field} no existe en tu dependencia.");
@@ -61,7 +76,8 @@ trait EnsuresDependencia
             return [];
         }
 
-        $found = \App\Models\Usuario::whereIn('id', array_map('intval', $ids))
+        $found = Usuario::where('dependencia_id', $this->usuarioActual()->dependencia_id)
+            ->whereIn('id', array_map('intval', $ids))
             ->pluck('id')
             ->map(fn ($id) => (int) $id)
             ->all();
