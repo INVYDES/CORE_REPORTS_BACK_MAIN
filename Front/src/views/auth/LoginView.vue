@@ -83,8 +83,14 @@
         <!------------ Formulario ------------>
         <form @submit.prevent="handleLogin">
           <div class="form-group">
-            <label>Correo electrónico</label>
-            <input v-model="email" type="email" placeholder="correo@ejemplo.com" required />
+            <label>Correo electrónico o ID de Empleado</label>
+            <input
+              v-model="email"
+              type="text"
+              placeholder="correo@ejemplo.com o EMP-1001"
+              autocomplete="username"
+              required
+            />
           </div>
 
           <div class="form-group">

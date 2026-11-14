@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\HistoryController;
 use App\Http\Controllers\Api\LicenciaController;
 use App\Http\Controllers\Api\MaterialController;
 use App\Http\Controllers\Api\NotificacionController;
+use App\Http\Controllers\Api\PublicTicketController;
 use App\Http\Controllers\Api\ReporteController;
 use App\Http\Controllers\Api\ServicioController;
 use App\Http\Controllers\Api\TicketController;
@@ -38,6 +39,10 @@ Route::prefix('v1')->group(function () {
 
     // Catálogo de licencias: público
     Route::get('/licencias/disponibles', [LicenciaController::class, 'disponibles']);
+
+    // Portal público de tickets para clientes (autoservicio por empresa)
+    Route::get('/public/empresa/{slug}', [PublicTicketController::class, 'empresa']);
+    Route::post('/public/empresa/{slug}/tickets', [PublicTicketController::class, 'store']);
 
     // Documentos de evidencias: acceso mediante URL firmada temporal.
     Route::get('evidencias/{evidencia}/documento', [EvidenciaController::class, 'documento'])
@@ -66,6 +71,7 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('reportes', ReporteController::class);
         Route::patch('reportes/{reporte}/conformidad', [ReporteController::class, 'conformidad']);
         Route::get('reportes/{reporte}/pdf', [ReporteController::class, 'pdf']);
+        Route::post('reportes/{reporte}/enviar-correo', [ReporteController::class, 'enviarCorreo']);
         Route::apiResource('materiales', MaterialController::class)->parameters(['materiales' => 'material']);
         Route::post('materiales/{material}/entrada', [MaterialController::class, 'entrada']);
         Route::get('materiales/{material}/movimientos', [MaterialController::class, 'movimientos']);

@@ -21,10 +21,21 @@ abstract class Controller
     {
         $user = $request->user();
 
-        if (! $user instanceof Usuario) {
-            abort(401, 'No autenticado.');
+        if (! $user && auth()->check()) {
+            $user = auth()->user();
         }
 
-        return $user;
+        if ($user instanceof Usuario) {
+            return $user;
+        }
+
+        if ($user && isset($user->id)) {
+            $u = Usuario::find($user->id);
+            if ($u) {
+                return $u;
+            }
+        }
+
+        abort(401, 'No autenticado.');
     }
 }

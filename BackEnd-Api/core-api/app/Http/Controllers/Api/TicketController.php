@@ -3,24 +3,104 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\StoreTicketRequest;
-use App\Http\Requests\UpdateTicketRequest;
 use App\Models\Area;
 use App\Models\Equipo;
 use App\Models\Ticket;
 use App\Models\Usuario;
-use App\Traits\EnsuresDependencia;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class TicketController extends Controller
 {
-    use EnsuresDependencia;
+    private function authUser(Request $request): Usuario
+    {
+        $user = $request->user() ?? auth()->user();
+        if (! $user instanceof Usuario) {
+            abort(401, 'No autenticado.');
+        }
+
+        return $user;
+    }
+
+    private function ensureOwnDependencia(Request $request, Model $model): void
+    {
+        if ((int) $model->getAttribute('dependencia_id') !== (int) $this->authUser($request)->dependencia_id) {
+            abort(403, 'El recurso no pertenece a tu dependencia.');
+        }
+    }
+
+    private function resolveFk(Request $request, string $field, string $modelClass): ?int
+    {
+        $id = $request->input($field);
+        if ($id === null || $id === '') {
+            return null;
+        }
+
+        $depId = $this->authUser($request)->dependencia_id;
+        $found = $modelClass::withoutGlobalScopes()
+            ->where('dependencia_id', $depId)
+            ->find((int) $id);
+
+        if ($found === null) {
+            return null;
+        }
+
+        return (int) $found->getKey();
+    }
+
+    private function generarFolioSecuencial(int $dependenciaId): string
+    {
+        $prefijo = 'TKT-'.now('America/Mexico_City')->format('Ymd');
+
+        $ultimo = Ticket::withoutGlobalScopes()
+            ->where('dependencia_id', $dependenciaId)
+            ->where('folio', 'like', $prefijo.'-%')
+            ->orderByDesc('folio')
+            ->value('folio');
+
+        $secuencia = $ultimo ? ((int) substr((string) $ultimo, -4)) + 1 : 1;
+
+        return sprintf('%s-%04d', $prefijo, $secuencia);
+    }
+
+    private function sincronizarTicketsConReportesFinalizados(int $depId): void
+    {
+        try {
+            $ahora = now('America/Mexico_City')->format('Y-m-d H:i:s');
+            DB::table('tickets')
+                ->where('dependencia_id', $depId)
+                ->whereIn('estatus', ['abierto', 'en_proceso'])
+                ->whereExists(function ($sub) {
+                    $sub->select(DB::raw(1))
+                        ->from('reportes')
+                        ->whereColumn('reportes.ticket_id', 'tickets.id')
+                        ->where('reportes.estatus', 'finalizado')
+                        ->whereNull('reportes.deleted_at');
+                })
+                ->update([
+                    'estatus' => 'resuelto',
+                    'fecha_atencion' => DB::raw("COALESCE(fecha_atencion, '{$ahora}')"),
+                    'updated_at' => $ahora,
+                ]);
+        } catch (\Throwable $e) {
+            report($e);
+        }
+    }
 
     public function index(Request $request): JsonResponse
     {
+        $user = $request->user() ?? auth()->user();
+        if ($user && isset($user->dependencia_id)) {
+            $this->sincronizarTicketsConReportesFinalizados((int) $user->dependencia_id);
+        }
+
         $q = Ticket::with(['asignado', 'area', 'equipo']);
+
+        if ($user && (int) $user->rol === 3) {
+            $q->where('usuario_asignado_id', $user->id);
+        }
 
         if ($request->filled('estatus')) {
             $q->where('estatus', $request->string('estatus'));
@@ -50,59 +130,97 @@ class TicketController extends Controller
         return response()->json($q->orderByDesc('fecha_solicitud')->paginate(min((int) $request->get('per_page', 15), 100)));
     }
 
-    public function store(StoreTicketRequest $request): JsonResponse
+    public function store(Request $request): JsonResponse
     {
-        $data = $request->validated();
+        $data = $request->validate([
+            'folio' => 'sometimes|nullable|string|max:50',
+            'asunto' => 'required|string|max:200',
+            'descripcion' => 'nullable|string',
+            'solicitante' => 'nullable|string|max:150',
+            'cargo' => 'nullable|string|max:150',
+            'prioridad' => 'sometimes|in:alta,media,baja',
+            'estatus' => 'sometimes|in:abierto,en_proceso,resuelto,cerrado',
+            'fecha_limite' => 'nullable|date',
+            'sla_horas' => 'nullable|integer|min:1',
+            'usuario_asignado_id' => 'nullable|integer',
+            'area_id' => 'nullable|integer',
+            'equipo_id' => 'nullable|integer',
+        ]);
 
-        // FKs validadas contra la dependencia activa (evita cross-tenant)
-        $data['usuario_asignado_id'] = $this->validatedDependenciaId($request, 'usuario_asignado_id', Usuario::class);
-        $data['area_id'] = $this->validatedDependenciaId($request, 'area_id', Area::class);
-        $data['equipo_id'] = $this->validatedDependenciaId($request, 'equipo_id', Equipo::class);
+        $user = $this->authUser($request);
+        $depId = (int) $user->dependencia_id;
 
-        if ($this->validatedDependenciaId($request, 'usuario_asignado_id', Usuario::class) !== null) {
+        $data['dependencia_id'] = $depId;
+        $data['usuario_asignado_id'] = $this->resolveFk($request, 'usuario_asignado_id', Usuario::class);
+        $data['area_id'] = $this->resolveFk($request, 'area_id', Area::class);
+        $data['equipo_id'] = $this->resolveFk($request, 'equipo_id', Equipo::class);
+
+        if ($data['usuario_asignado_id'] !== null) {
             $this->authorize('assign', Ticket::class);
         }
 
         $data['estatus'] = $data['estatus'] ?? 'abierto';
         $data['prioridad'] = $data['prioridad'] ?? 'media';
-        $data['fecha_solicitud'] = now();
+        $data['fecha_solicitud'] = now('America/Mexico_City')->format('Y-m-d H:i:s');
 
-        // Folio correlativo y alta en la misma transacción (ver GeneraFolio).
-        $ticket = Ticket::createConFolio($data, $this->usuario($request)->dependencia_id);
+        $ticket = DB::transaction(function () use ($data, $depId) {
+            $folioActual = trim((string) ($data['folio'] ?? ''));
+            if ($folioActual === '' || preg_match('/^TKT-\d{6}$/', $folioActual)) {
+                $data['folio'] = $this->generarFolioSecuencial($depId);
+            }
+
+            $tkt = new Ticket;
+            $tkt->forceFill($data);
+            $tkt->save();
+
+            return $tkt;
+        });
 
         return response()->json($ticket->load(['asignado', 'area', 'equipo']), 201);
     }
 
-    public function show(Ticket $ticket): JsonResponse
+    public function show(Request $request, Ticket $ticket): JsonResponse
     {
-        $this->ensureOwnDependencia($ticket);
+        $this->ensureOwnDependencia($request, $ticket);
+        $this->sincronizarTicketsConReportesFinalizados((int) $ticket->dependencia_id);
+        $ticket->refresh();
 
         return response()->json($ticket->load(['asignado', 'area', 'equipo', 'historial', 'reportes']));
     }
 
-    public function update(UpdateTicketRequest $request, Ticket $ticket): JsonResponse
+    public function update(Request $request, Ticket $ticket): JsonResponse
     {
         $this->authorize('update', $ticket);
 
-        $data = $request->validated();
+        $data = $request->validate([
+            'asunto' => 'sometimes|string|max:200',
+            'descripcion' => 'sometimes|nullable|string',
+            'solicitante' => 'sometimes|nullable|string|max:150',
+            'cargo' => 'sometimes|nullable|string|max:150',
+            'prioridad' => 'sometimes|in:alta,media,baja',
+            'estatus' => 'sometimes|in:abierto,en_proceso,resuelto,cerrado',
+            'fecha_limite' => 'sometimes|nullable|date',
+            'sla_horas' => 'sometimes|nullable|integer|min:1',
+            'usuario_asignado_id' => 'sometimes|nullable|integer',
+            'area_id' => 'sometimes|nullable|integer',
+            'equipo_id' => 'sometimes|nullable|integer',
+        ]);
 
         if (array_key_exists('usuario_asignado_id', $data)) {
-            $nuevoAsignado = $this->validatedDependenciaId($request, 'usuario_asignado_id', Usuario::class);
+            $nuevoAsignado = $this->resolveFk($request, 'usuario_asignado_id', Usuario::class);
             if ($nuevoAsignado !== null && (int) $ticket->usuario_asignado_id !== $nuevoAsignado) {
                 $this->authorize('assign', $ticket);
             }
             $data['usuario_asignado_id'] = $nuevoAsignado;
         }
         if (array_key_exists('area_id', $data)) {
-            $data['area_id'] = $this->validatedDependenciaId($request, 'area_id', Area::class);
+            $data['area_id'] = $this->resolveFk($request, 'area_id', Area::class);
         }
         if (array_key_exists('equipo_id', $data)) {
-            $data['equipo_id'] = $this->validatedDependenciaId($request, 'equipo_id', Equipo::class);
+            $data['equipo_id'] = $this->resolveFk($request, 'equipo_id', Equipo::class);
         }
 
-        // El historial de estatus lo registra TicketObserver (registrado en
-        // AppServiceProvider): no se duplica aquí.
-        $ticket->update($data);
+        $ticket->forceFill($data)->save();
 
         return response()->json($ticket->load(['asignado', 'area', 'equipo']));
     }
@@ -119,34 +237,36 @@ class TicketController extends Controller
     {
         $this->authorize('assign', $ticket);
 
-        $data = $request->validate([
+        $request->validate([
             'usuario_asignado_id' => 'required|integer',
         ]);
 
-        $usuarioId = $this->validatedDependenciaId($request, 'usuario_asignado_id', Usuario::class);
+        $usuarioId = $this->resolveFk($request, 'usuario_asignado_id', Usuario::class);
         if ($usuarioId === null) {
             return response()->json(['message' => 'El usuario a asignar no existe en tu dependencia.'], 422);
         }
 
         $ticket = DB::transaction(function () use ($ticket, $usuarioId) {
-            // TicketObserver registra el historial del cambio de estatus.
             $ticket->update([
                 'usuario_asignado_id' => $usuarioId,
                 'estatus' => $ticket->estatus === 'abierto' ? 'en_proceso' : $ticket->estatus,
             ]);
 
-            // Notificación: el correo lo envía EnviarNotificacionesPendientes.
-            \App\Models\Notificacion::create([
-                'dependencia_id' => $ticket->dependencia_id,
-                'tipo' => 'ticket_asignado',
-                'referencia_tipo' => 'ticket',
-                'referencia_id' => $ticket->id,
-                'destinatario' => $ticket->asignado->email ?? '',
-                'usuario_id' => $usuarioId,
-                'asunto' => "Ticket {$ticket->folio} asignado",
-                'cuerpo' => "Se te asignó el ticket {$ticket->folio}: {$ticket->asunto}",
-                'estatus' => 'pendiente',
-            ]);
+            try {
+                \App\Models\Notificacion::create([
+                    'dependencia_id' => $ticket->dependencia_id,
+                    'tipo' => 'ticket_asignado',
+                    'referencia_tipo' => 'ticket',
+                    'referencia_id' => $ticket->id,
+                    'destinatario' => $ticket->asignado->email ?? '',
+                    'usuario_id' => $usuarioId,
+                    'asunto' => "Ticket {$ticket->folio} asignado",
+                    'cuerpo' => "Se te asignó el ticket {$ticket->folio}: {$ticket->asunto}",
+                    'estatus' => 'pendiente',
+                ]);
+            } catch (\Throwable $e) {
+                report($e);
+            }
 
             return $ticket;
         });
@@ -154,42 +274,47 @@ class TicketController extends Controller
         return response()->json($ticket->load('asignado'));
     }
 
-    /**
-     * GET /api/v1/tecnicos o /api/tecnicos
-     * Obtiene los usuarios y técnicos de la empresa para asignación
-     */
     public function tecnicos(Request $request): JsonResponse
     {
-        $idEmpresa = $this->usuario($request)->dependencia_id ?? $this->usuario($request)->id_dependencia;
+        try {
+            $user = $this->authUser($request);
+            $idEmpresa = $user->dependencia_id ?? $user->id_dependencia ?? 1;
 
-        $tecnicos = Usuario::where('dependencia_id', $idEmpresa)
-            ->where('estado', true)
-            ->orderBy('nombre', 'asc')
-            ->get()
-            ->map(function ($u) {
-                // Se devuelven alias camelCase y snake_case para que cualquier
-                // selector del front (ejecutores, asignación, filtros) lo consuma
-                // como reemplazo directo de /usuarios, que está paginado.
-                return [
-                    'id' => $u->id,
-                    'idUsuario' => $u->id,
-                    'id_usuario' => $u->id,
-                    'idDependencia' => (int) $u->dependencia_id,
-                    'dependencia_id' => (int) $u->dependencia_id,
-                    'nombre' => $u->nombre,
-                    'apellidos' => $u->apellidos ?: '',
-                    'correo' => $u->email,
-                    'email' => $u->email,
-                    'rol' => (int) $u->rol,
-                    'estado' => (bool) $u->estado,
-                    'numeroEmpleado' => $u->numero_empleado ?: ('EMP-'.str_pad((string) $u->id, 3, '0', STR_PAD_LEFT)),
-                    'numero_empleado' => $u->numero_empleado,
-                ];
-            });
+            $tecnicos = Usuario::where('dependencia_id', $idEmpresa)
+                ->where('estado', true)
+                ->orderBy('nombre', 'asc')
+                ->get()
+                ->map(function ($u) use ($idEmpresa) {
+                    $numEmp = $u->numero_empleado ?: ('EMP-'.$idEmpresa.str_pad((string) $u->id, 3, '0', STR_PAD_LEFT));
 
-        return response()->json([
-            'success' => true,
-            'data' => $tecnicos,
-        ], 200);
+                    return [
+                        'id' => $u->id,
+                        'idUsuario' => $u->id,
+                        'id_usuario' => $u->id,
+                        'idDependencia' => (int) $u->dependencia_id,
+                        'dependencia_id' => (int) $u->dependencia_id,
+                        'nombre' => $u->nombre,
+                        'apellidos' => $u->apellidos ?: '',
+                        'correo' => $u->email,
+                        'email' => $u->email,
+                        'rol' => (int) $u->rol,
+                        'estado' => (bool) $u->estado,
+                        'numeroEmpleado' => $numEmp,
+                        'numero_empleado' => $u->numero_empleado,
+                    ];
+                });
+
+            return response()->json([
+                'ok' => true,
+                'data' => $tecnicos,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Error en TicketController::tecnicos: ' . $e->getMessage());
+
+            return response()->json([
+                'ok' => false,
+                'message' => 'Error al obtener técnicos: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 }

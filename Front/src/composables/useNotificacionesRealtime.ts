@@ -28,10 +28,15 @@ export interface NotificacionItem {
   area_id?: number | null
   area?: NotificacionArea | null
   referencia?: NotificacionReferencia | null
+  usuario_id?: number | null
+  destinatario?: string | null
 }
 
 interface UseNotificacionesOptions {
   areaId?: () => number | null | undefined
+  usuarioId?: () => number | null | undefined
+  userEmail?: () => string | null | undefined
+  userRole?: () => number | null | undefined
   intervalMs?: number
 }
 
@@ -49,7 +54,7 @@ export function useNotificacionesRealtime(options: UseNotificacionesOptions = {}
   let newestSeenId: number | null = null
 
   const buildParams = () => {
-    const params: Record<string, unknown> = { per_page: 20 }
+    const params: Record<string, unknown> = { per_page: 50 }
     const areaId = options.areaId?.()
     if (areaId) params.area_id = areaId
     return params
@@ -64,7 +69,51 @@ export function useNotificacionesRealtime(options: UseNotificacionesOptions = {}
     try {
       const res = await notificacionesApi.list(buildParams())
       const list = res?.data ?? res
-      const items: NotificacionItem[] = Array.isArray(list) ? list : []
+      const rawItems: NotificacionItem[] = Array.isArray(list) ? list : []
+
+      const uid = options.usuarioId?.()
+      const uemail = (options.userEmail?.() || '').toLowerCase().trim()
+      const role = options.userRole?.()
+
+      const items: NotificacionItem[] = []
+
+      for (const raw of rawItems) {
+        const item = { ...raw }
+        const itemUid = item.usuario_id ? Number(item.usuario_id) : null
+        const itemEmail = (item.destinatario || '').toLowerCase().trim()
+        const isAsignacion =
+          item.tipo === 'ticket_asignado' ||
+          item.tipo === 'servicio_asignado' ||
+          Boolean(item.tipo && item.tipo.toLowerCase().includes('asignado'))
+
+        // Si es Técnico (rol 3):
+        if (role === 3) {
+          const matchesThisUser =
+            (itemUid && uid && itemUid === Number(uid)) ||
+            (itemEmail && uemail && itemEmail === uemail)
+          const isBroadcast = !itemUid && !itemEmail
+
+          if (!matchesThisUser && !isBroadcast) {
+            continue
+          }
+        }
+
+        // Si es Administrador (rol 1 Admin Técnico o rol 2 Admin Comercial):
+        if (role !== 3 && isAsignacion) {
+          const isAssignedToThisAdmin =
+            (itemUid && uid && itemUid === Number(uid)) ||
+            (itemEmail && uemail && itemEmail === uemail)
+
+          // Si no fue asignado al admin mismo, cambiar "Se te asignó" por "Se asignó"
+          if (!isAssignedToThisAdmin && item.cuerpo) {
+            item.cuerpo = item.cuerpo
+              .replace(/se te asignó/gi, 'Se asignó')
+              .replace(/se te asigno/gi, 'Se asignó')
+          }
+        }
+
+        items.push(item)
+      }
 
       const newestId = items.reduce((max, item) => Math.max(max, Number(item.id) || 0), 0)
       if (newestSeenId !== null && newestId > newestSeenId) {
@@ -73,11 +122,7 @@ export function useNotificacionesRealtime(options: UseNotificacionesOptions = {}
       newestSeenId = newestId
 
       notifications.value = items
-      unreadCount.value = Number(
-        res?.meta?.no_leidas ??
-          res?.no_leidas ??
-          items.filter(item => !item.leida_at).length
-      )
+      unreadCount.value = items.filter(item => !item.leida_at).length
       isLive.value = true
     } catch {
       isLive.value = false

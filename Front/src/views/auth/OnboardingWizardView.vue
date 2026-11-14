@@ -72,7 +72,9 @@
           email: tech.correo,
           password,
           rol: 3,
-          numero_empleado: tech.numeroEmpleado || `EMP-${Date.now()}`,
+          numero_empleado:
+            tech.numeroEmpleado ||
+            `EMP-${(authStore.currentUser as any)?.dependencia_id || 1}${String(i + 1).padStart(3, '0')}`,
         })
         created.value.push({ email: tech.correo, password, rol: 'Técnico' })
       }

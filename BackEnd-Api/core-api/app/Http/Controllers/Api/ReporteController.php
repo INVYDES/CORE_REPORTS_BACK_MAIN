@@ -3,29 +3,144 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\StoreReporteRequest;
+use App\Mail\ReportePdfMail;
 use App\Models\Area;
 use App\Models\Equipo;
 use App\Models\MaterialCatalogo;
 use App\Models\Reporte;
+use App\Models\Servicio;
+use App\Models\Ticket;
 use App\Models\Usuario;
 use App\Services\InventarioService;
-use App\Services\UploadStorageService;
-use App\Support\XlsxWriter;
-use App\Traits\EnsuresDependencia;
-use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
 
 class ReporteController extends Controller
 {
-    use EnsuresDependencia;
+    private function authUser(Request $request): Usuario
+    {
+        $user = $request->user() ?? auth()->user();
+        if (! $user instanceof Usuario) {
+            abort(401, 'No autenticado.');
+        }
 
-    public function __construct(private readonly UploadStorageService $uploads) {}
+        return $user;
+    }
+
+    private function ensureOwnDependencia(Request $request, Model $model): void
+    {
+        if ((int) $model->getAttribute('dependencia_id') !== (int) $this->authUser($request)->dependencia_id) {
+            abort(403, 'El recurso no pertenece a tu dependencia.');
+        }
+    }
+
+    private function resolveFk(Request $request, string $field, string $modelClass): ?int
+    {
+        $id = $request->input($field);
+        if ($id === null || $id === '') {
+            return null;
+        }
+
+        $depId = $this->authUser($request)->dependencia_id;
+        $found = $modelClass::withoutGlobalScopes()
+            ->where('dependencia_id', $depId)
+            ->find((int) $id);
+
+        if ($found === null) {
+            return null;
+        }
+
+        return (int) $found->getKey();
+    }
+
+    /**
+     * @return int[]
+     */
+    private function resolveUserIds(Request $request, string $field = 'ejecutores'): array
+    {
+        $ids = $request->input($field);
+        if (! is_array($ids) || $ids === []) {
+            return [];
+        }
+
+        $depId = $this->authUser($request)->dependencia_id;
+
+        return Usuario::where('dependencia_id', $depId)
+            ->whereIn('id', array_map('intval', $ids))
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+    }
+
+    private function generarFolioSecuencial(int $dependenciaId): string
+    {
+        $prefijo = 'REP-'.now('America/Mexico_City')->format('Ymd');
+
+        $ultimo = Reporte::withoutGlobalScopes()
+            ->where('dependencia_id', $dependenciaId)
+            ->where('folio', 'like', $prefijo.'-%')
+            ->orderByDesc('folio')
+            ->value('folio');
+
+        $secuencia = $ultimo ? ((int) substr((string) $ultimo, -4)) + 1 : 1;
+
+        return sprintf('%s-%04d', $prefijo, $secuencia);
+    }
+
+    /**
+     * Sincroniza directamente el estatus del Ticket o Servicio origen cuando se crea o edita un reporte,
+     * sin depender de que ReporteObserver esté registrado en producción.
+     */
+    private function sincronizarOrigen(Reporte $reporte): void
+    {
+        try {
+            $ahora = now('America/Mexico_City')->format('Y-m-d H:i:s');
+
+            if ($reporte->ticket_id) {
+                $ticket = Ticket::withoutGlobalScopes()->find((int) $reporte->ticket_id);
+                if ($ticket) {
+                    $fill = [
+                        'fecha_atencion' => $ticket->fecha_atencion ?? $ahora,
+                    ];
+                    if ($reporte->estatus === 'finalizado') {
+                        $fill['estatus'] = 'resuelto';
+                        if (Schema::hasColumn('tickets', 'fecha_cierre')) {
+                            $fill['fecha_cierre'] = $ticket->fecha_cierre ?? $ahora;
+                        }
+                    } elseif (in_array($reporte->estatus, ['abierto', 'parcial'], true) && $ticket->estatus === 'abierto') {
+                        $fill['estatus'] = 'en_proceso';
+                    }
+                    $ticket->forceFill($fill)->save();
+                }
+            }
+
+            if ($reporte->servicio_id) {
+                $servicio = Servicio::withoutGlobalScopes()->find((int) $reporte->servicio_id);
+                if ($servicio) {
+                    if ($reporte->estatus === 'finalizado') {
+                        $servicio->forceFill([
+                            'estatus' => 'realizado',
+                        ])->save();
+                    } elseif (in_array($reporte->estatus, ['abierto', 'parcial'], true) && $servicio->estatus === 'programado') {
+                        $servicio->forceFill([
+                            'estatus' => 'en_proceso',
+                        ])->save();
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Error en sincronizarOrigen: ' . $e->getMessage());
+        }
+    }
 
     public function index(Request $request): JsonResponse
     {
@@ -35,13 +150,6 @@ class ReporteController extends Controller
         return response()->json($q->orderByDesc('fecha_inicio')->paginate(min((int) $request->get('per_page', 15), 100)));
     }
 
-    /**
-     * GET /api/v1/reportes/export?formato=csv|xlsx
-     *
-     * Exporta el listado de reportes aplicando los mismos filtros del index.
-     * CSV se emite con BOM UTF-8 y las celdas se sanean contra inyeccion de
-     * formulas. XLSX se genera con el escritor OOXML interno (sin ext-zip).
-     */
     public function export(Request $request): Response
     {
         $request->validate(['formato' => 'nullable|in:csv,xlsx']);
@@ -66,15 +174,13 @@ class ReporteController extends Controller
 
         $sufijo = now()->format('Ymd-His');
 
-        if ($formato === 'xlsx') {
+        if ($formato === 'xlsx' && class_exists(\App\Support\XlsxWriter::class)) {
             return response()->streamDownload(function () use ($headers, $rows): void {
                 $out = fopen('php://output', 'w');
-
                 if ($out === false) {
                     return;
                 }
-
-                XlsxWriter::stream($out, 'Reportes', $headers, $rows);
+                \App\Support\XlsxWriter::stream($out, 'Reportes', $headers, $rows);
                 fclose($out);
             }, 'reportes-'.$sufijo.'.xlsx', [
                 'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -84,7 +190,6 @@ class ReporteController extends Controller
 
         return response()->streamDownload(function () use ($headers, $rows): void {
             $out = fopen('php://output', 'w');
-
             if ($out === false) {
                 return;
             }
@@ -109,6 +214,7 @@ class ReporteController extends Controller
     private function exportRow(Reporte $r): array
     {
         $evidencias = $r->evidencias;
+        $cleanDesarrollo = preg_replace('/\n?<!--CORE_META:[A-Za-z0-9+\/=]+-->\s*$/', '', (string) ($r->desarrollo ?? ''));
 
         return [
             $r->folio,
@@ -116,14 +222,14 @@ class ReporteController extends Controller
             $r->ticket?->folio ?: ($r->servicio?->folio ?: ''),
             $r->categoria,
             $r->estatus,
-            $r->fecha_inicio->format('Y-m-d H:i'),
-            $r->fecha_fin->format('Y-m-d H:i'),
+            $r->fecha_inicio?->format('Y-m-d H:i') ?? '',
+            $r->fecha_fin?->format('Y-m-d H:i') ?? '',
             $r->area?->nombre ?: '',
             $r->equipo?->nombre ?: '',
             $r->responsable ? trim($r->responsable->nombre.' '.$r->responsable->apellidos) : '',
             $r->creador ? trim($r->creador->nombre.' '.$r->creador->apellidos) : '',
             $r->ejecutores->map(fn ($e) => $e->usuario ? trim($e->usuario->nombre.' '.$e->usuario->apellidos) : null)->filter()->implode(', '),
-            $r->desarrollo,
+            $cleanDesarrollo,
             (float) $r->costo_mano_obra,
             $r->materiales->count(),
             (float) $r->costo_materiales,
@@ -139,6 +245,13 @@ class ReporteController extends Controller
     private function filteredQuery(Request $request): Builder
     {
         $q = Reporte::query();
+
+        $user = $request->user() ?? auth()->user();
+        if ($user && (int) $user->rol === 3) {
+            $q->where('creado_por', $user->id);
+        } elseif ($request->filled('creado_por')) {
+            $q->where('creado_por', (int) $request->get('creado_por'));
+        }
 
         if ($request->filled('tipo')) {
             $q->where('tipo', $request->string('tipo'));
@@ -171,9 +284,6 @@ class ReporteController extends Controller
         return $q;
     }
 
-    /**
-     * Evita inyeccion de formulas al abrir el CSV en Excel/LibreOffice.
-     */
     private function safeCsvCell(mixed $value): string
     {
         $text = $value === null ? '' : (string) $value;
@@ -185,33 +295,65 @@ class ReporteController extends Controller
         return $text;
     }
 
-    public function store(StoreReporteRequest $request, InventarioService $inv): JsonResponse
+    public function store(Request $request, InventarioService $inv): JsonResponse
     {
-        $this->authorize('create', Reporte::class);
+        try {
+            $this->authorize('create', Reporte::class);
 
-        $data = $request->validated();
+        $data = $request->validate([
+            'folio' => 'sometimes|nullable|string|max:50',
+            'tipo' => 'required|in:ticket,servicio,libre',
+            'ticket_id' => 'nullable|integer',
+            'servicio_id' => 'nullable|integer',
+            'categoria' => 'nullable|in:preventivo,correctivo,diagnostico,instalacion,mejora',
+            'fecha_inicio' => 'required|date',
+            'fecha_fin' => 'required|date|after:fecha_inicio',
+            'desarrollo' => 'nullable|string',
+            'estatus' => 'sometimes|in:abierto,parcial,finalizado,descartado',
+            'area_id' => 'nullable|integer',
+            'equipo_id' => 'nullable|integer',
+            'responsable_id' => 'nullable|integer',
+            'hora_salida' => 'nullable|date',
+            'hora_llegada' => 'nullable|date',
+            'hora_inicio_diagnostico' => 'nullable|date',
+            'hora_inicio_trabajo' => 'nullable|date',
+            'hora_fin_trabajo' => 'nullable|date',
+            'hora_regreso' => 'nullable|date',
+            'es_retrabajo' => 'sometimes|boolean',
+            'reporte_origen_id' => 'nullable|integer',
+            'costo_mano_obra' => 'sometimes|numeric|min:0',
+            'costo_materiales' => 'sometimes|numeric|min:0',
+            'ejecutores' => 'sometimes|array',
+            'ejecutores.*' => 'integer',
+            'materiales' => 'sometimes|array',
+            'materiales.*.material_id' => 'required_with:materiales|integer',
+            'materiales.*.cantidad' => 'required_with:materiales|numeric|min:0.01',
+            'evidencias' => 'sometimes|array|max:20',
+            'evidencias.*' => 'file|mimes:jpg,jpeg,png,gif,webp,pdf,csv,xls,xlsx|max:10240',
+            'evidenciaFotografica' => 'sometimes|array|max:20',
+        ]);
 
-        // Límite mensual de reportes por licencia
-        $dep = $this->usuario($request)->dependencia;
-        $countMes = Reporte::whereYear('fecha_inicio', now()->year)
-            ->whereMonth('fecha_inicio', now()->month)
-            ->count();
-        if ($countMes >= $dep->limite_reportes_mensuales) {
-            return response()->json(['message' => 'Límite de reportes mensuales alcanzado'], 422);
+        $user = $this->authUser($request);
+        $dep = $user->dependencia;
+        if ($dep) {
+            $countMes = Reporte::whereYear('fecha_inicio', now()->year)
+                ->whereMonth('fecha_inicio', now()->month)
+                ->count();
+            if ($countMes >= $dep->limite_reportes_mensuales) {
+                return response()->json(['message' => 'Límite de reportes mensuales alcanzado'], 422);
+            }
         }
 
-        // FKs validadas contra la dependencia activa
-        $data['ticket_id'] = $this->validatedDependenciaId($request, 'ticket_id', \App\Models\Ticket::class);
-        $data['servicio_id'] = $this->validatedDependenciaId($request, 'servicio_id', \App\Models\Servicio::class);
-        $data['area_id'] = $this->validatedDependenciaId($request, 'area_id', Area::class);
-        $data['equipo_id'] = $this->validatedDependenciaId($request, 'equipo_id', Equipo::class);
-        $data['responsable_id'] = $this->validatedDependenciaId($request, 'responsable_id', Usuario::class);
-        $data['reporte_origen_id'] = $this->validatedDependenciaId($request, 'reporte_origen_id', Reporte::class);
+        $data['ticket_id'] = $this->resolveFk($request, 'ticket_id', Ticket::class);
+        $data['servicio_id'] = $this->resolveFk($request, 'servicio_id', Servicio::class);
+        $data['area_id'] = $this->resolveFk($request, 'area_id', Area::class);
+        $data['equipo_id'] = $this->resolveFk($request, 'equipo_id', Equipo::class);
+        $data['responsable_id'] = $this->resolveFk($request, 'responsable_id', Usuario::class);
+        $data['reporte_origen_id'] = $this->resolveFk($request, 'reporte_origen_id', Reporte::class);
 
-        $ejecutores = $this->validatedDependenciaUserIds($request, 'ejecutores');
-        unset($data['ejecutores']);
+        $ejecutores = $this->resolveUserIds($request, 'ejecutores');
+        unset($data['ejecutores'], $data['materiales'], $data['evidencias'], $data['evidenciaFotografica']);
 
-        // Coherencia tipo ↔ origen
         if ($data['tipo'] === 'libre') {
             $data['ticket_id'] = null;
             $data['servicio_id'] = null;
@@ -229,42 +371,36 @@ class ReporteController extends Controller
 
         $materiales = collect((array) $request->input('materiales', []))
             ->map(fn ($m) => [
-                'material' => MaterialCatalogo::find((int) $m['material_id']),
-                'cantidad' => (float) $m['cantidad'],
+                'material' => MaterialCatalogo::find((int) ($m['material_id'] ?? 0)),
+                'cantidad' => (float) ($m['cantidad'] ?? 1),
             ])
             ->filter(fn ($m) => $m['material'] !== null)
             ->values();
 
-        if ($request->input('materiales') !== null && count($materiales) !== count($request->input('materiales'))) {
-            return response()->json(['message' => 'Algún material no existe en tu dependencia'], 422);
-        }
-
-        // Limites adicionales para evidencias: maximo 20 archivos y 5 MB por
-        // imagen (los documentos pueden llegar a 10 MB, validado en el FormRequest).
         $archivos = (array) $request->file('evidencias', []);
         $totalEvidencias = count($archivos) + count((array) $request->input('evidenciaFotografica', []));
-
         if ($totalEvidencias > 20) {
             throw ValidationException::withMessages([
                 'evidencias' => 'Puedes adjuntar como maximo 20 archivos por reporte.',
             ]);
         }
 
-        foreach ($archivos as $archivo) {
-            if ($this->uploads->isImage($archivo) && $archivo->getSize() > 5 * 1024 * 1024) {
-                throw ValidationException::withMessages([
-                    'evidencias' => 'Cada imagen debe pesar como maximo 5 MB.',
-                ]);
-            }
-        }
+        $hasRutaColumn = Schema::hasColumn('reporte_evidencias', 'ruta');
 
-        $reporte = DB::transaction(function () use ($request, $data, $ejecutores, $materiales, $inv) {
-            $data['dependencia_id'] = $this->usuario($request)->dependencia_id;
-            $data['creado_por'] = $this->usuario($request)->id;
-            $data['folio'] = $data['folio'] ?? Reporte::generarFolio($this->usuario($request)->dependencia_id);
+        $reporte = DB::transaction(function () use ($request, $user, $data, $ejecutores, $materiales, $inv, $hasRutaColumn) {
+            $depId = (int) $user->dependencia_id;
+            $data['dependencia_id'] = $depId;
+            $data['creado_por'] = $user->id;
+
+            $folioActual = trim((string) ($data['folio'] ?? ''));
+            if ($folioActual === '' || preg_match('/^REP-\d{6}$/', $folioActual)) {
+                $data['folio'] = $this->generarFolioSecuencial($depId);
+            }
             $data['estatus'] = $data['estatus'] ?? 'abierto';
 
-            $reporte = Reporte::create($data);
+            $reporte = new Reporte;
+            $reporte->forceFill($data);
+            $reporte->save();
 
             foreach ($ejecutores as $uid) {
                 $reporte->ejecutores()->create([
@@ -280,44 +416,45 @@ class ReporteController extends Controller
                     'cantidad' => $m['cantidad'],
                     'costo_unitario' => $m['material']->costo_unitario,
                 ]);
-                $inv->registrarSalida(
-                    $reporte->dependencia_id,
-                    $m['material']->id,
-                    $m['cantidad'],
-                    'reporte',
-                    $reporte->id,
-                    $this->usuario($request)->id
-                );
+                try {
+                    $inv->registrarSalida(
+                        $reporte->dependencia_id,
+                        $m['material']->id,
+                        $m['cantidad'],
+                        'reporte',
+                        $reporte->id,
+                        $user->id
+                    );
+                } catch (\Throwable $e) {
+                    report($e);
+                }
             }
 
             $carpetaEvidencias = 'evidencias/'.$reporte->dependencia_id;
 
-            // Evidencias por multipart. Las imagenes se guardan en /imagenes y
-            // los documentos (PDF/Excel/CSV) en /documentos, para que las
-            // fotografias se puedan mostrar inline por URL desde IONOS.
             if ($request->hasFile('evidencias')) {
                 foreach ($request->file('evidencias') as $file) {
-                    $isImage = $this->uploads->isImage($file);
+                    $mime = $file->getMimeType() ?: 'application/octet-stream';
+                    $isImage = str_starts_with($mime, 'image/');
                     $carpeta = $carpetaEvidencias.'/'.($isImage ? 'imagenes' : 'documentos');
-                    $path = $this->uploads->storeFile(
-                        $file,
-                        $carpeta,
-                        $this->uploads->visibilityFor($isImage)
-                    );
+                    $path = $file->store($carpeta, 'public');
+                    $url = Storage::disk('public')->url($path);
 
-                    $reporte->evidencias()->create([
+                    $evPayload = [
                         'dependencia_id' => $reporte->dependencia_id,
-                        'url' => $this->uploads->url($path),
-                        'ruta' => $path,
-                        'disco' => $this->uploads->diskName(),
-                        'tipo_archivo' => $this->uploads->mimeType($file),
+                        'url' => $url,
+                        'tipo_archivo' => $mime,
                         'peso_kb' => (int) ceil($file->getSize() / 1024),
-                        'subido_por' => $this->usuario($request)->id,
-                    ]);
+                        'subido_por' => $user->id,
+                    ];
+                    if ($hasRutaColumn) {
+                        $evPayload['ruta'] = $path;
+                        $evPayload['disco'] = 'public';
+                    }
+                    $reporte->evidencias()->create($evPayload);
                 }
             }
 
-            // Evidencias fotográficas en base64 o array de URLs/base64
             $evidenciasInput = $request->input('evidenciaFotografica');
             if (is_array($evidenciasInput)) {
                 foreach ($evidenciasInput as $evi) {
@@ -328,74 +465,119 @@ class ReporteController extends Controller
                         continue;
                     }
 
-                    $decoded = $this->uploads->decodeImageDataUri($valor);
                     $ruta = null;
-                    $disco = null;
-
-                    if ($decoded) {
-                        // Mismo límite que las imágenes multipart: 5 MB.
-                        if (strlen($decoded['contents']) > 5 * 1024 * 1024) {
-                            throw ValidationException::withMessages([
-                                'evidenciaFotografica' => 'Cada imagen debe pesar como maximo 5 MB.',
-                            ]);
+                    if (preg_match('#^data:image/(jpeg|jpg|png|gif|webp);base64,(.+)$#is', $valor, $m)) {
+                        $ext = strtolower($m[1]) === 'jpeg' ? 'jpg' : strtolower($m[1]);
+                        $mime = 'image/'.($ext === 'jpg' ? 'jpeg' : $ext);
+                        $bytes = base64_decode($m[2], true);
+                        if ($bytes === false) {
+                            continue;
                         }
-
-                        $path = $this->uploads->storeContents(
-                            $decoded['contents'],
-                            $carpetaEvidencias.'/imagenes',
-                            $decoded['extension'],
-                            $this->uploads->visibilityFor(true)
-                        );
-                        $url = $this->uploads->url($path);
-                        $ruta = $path;
-                        $disco = $this->uploads->diskName();
-                        $mime = $decoded['mime'];
-                        $pesoKb = (int) ceil(strlen($decoded['contents']) / 1024);
-                    } elseif (str_starts_with($valor, 'data:')) {
-                        // Un data-URI que no es una imagen raster (JPG/PNG/GIF/WebP)
-                        // no se acepta: evita guardar documentos embebidos como si
-                        // fueran referencias remotas.
-                        throw ValidationException::withMessages([
-                            'evidenciaFotografica' => 'Solo se admiten imagenes JPG, PNG, GIF o WebP en base64. Sube los documentos como archivos.',
-                        ]);
+                        $filename = $carpetaEvidencias.'/imagenes/'.uniqid('ev_', true).'.'.$ext;
+                        Storage::disk('public')->put($filename, $bytes);
+                        $ruta = $filename;
+                        $url = Storage::disk('public')->url($filename);
+                        $pesoKb = (int) ceil(strlen($bytes) / 1024);
                     } else {
-                        // Referencia ya almacenada (URL absoluta o ruta relativa)
-                        if (str_starts_with($valor, 'http')) {
-                            $url = $valor;
-                        } else {
-                            $ruta = ltrim($valor, '/');
-                            $disco = $this->uploads->diskName();
-                            $url = $this->uploads->url($ruta);
-                        }
+                        $url = $valor;
                         $mime = is_array($evi) ? ($evi['tipoArchivo'] ?? $evi['tipo_archivo'] ?? null) : null;
                         $pesoKb = 0;
                     }
 
-                    $reporte->evidencias()->create([
+                    $evPayload = [
                         'dependencia_id' => $reporte->dependencia_id,
                         'url' => $url,
-                        'ruta' => $ruta,
-                        'disco' => $disco,
                         'tipo_archivo' => $mime,
                         'peso_kb' => $pesoKb,
-                        'subido_por' => $this->usuario($request)->id,
-                    ]);
+                        'subido_por' => $user->id,
+                    ];
+                    if ($hasRutaColumn && $ruta) {
+                        $evPayload['ruta'] = $ruta;
+                        $evPayload['disco'] = 'public';
+                    }
+                    $reporte->evidencias()->create($evPayload);
                 }
             }
 
-            // La sincronización de estatus del ticket/servicio origen la hace
-            // ReporteObserver (registrado en AppServiceProvider).
+            $this->sincronizarOrigen($reporte);
+
             return $reporte;
         });
 
-        return response()->json($reporte->load(['ejecutores', 'materiales', 'evidencias']), 201);
+        // Enviar reporte por correo si fue solicitado
+        $destinatarios = array_values(array_filter(
+            array_map('trim', (array) $request->input('destinatarios_correo', [])),
+            fn ($email) => filter_var($email, FILTER_VALIDATE_EMAIL)
+        ));
+
+        $correoEnviado = false;
+        $correoError = null;
+        if ($request->boolean('enviar_correo') && !empty($destinatarios)) {
+            try {
+                $pdfContent = $this->renderPdfObject($reporte)->output();
+                $comentario = $request->input('comentario_correo');
+                Mail::to($destinatarios)->send(new ReportePdfMail($reporte, $pdfContent, $comentario));
+                $correoEnviado = true;
+            } catch (\Throwable $e) {
+                Log::error('Error al enviar correo del reporte: ' . $e->getMessage(), [
+                    'reporte_id' => $reporte->id,
+                    'destinatarios' => $destinatarios,
+                ]);
+                $correoError = $e->getMessage();
+            }
+        }
+
+        $resData = $reporte->load(['ejecutores', 'materiales', 'evidencias'])->toArray();
+        $resData['correo_enviado'] = $correoEnviado;
+        $resData['correo_error'] = $correoError;
+
+        return response()->json($resData, 201);
+    } catch (\Illuminate\Validation\ValidationException $ve) {
+        throw $ve;
+    } catch (\Illuminate\Auth\Access\AuthorizationException $ae) {
+        return response()->json([
+            'success' => false,
+            'message' => 'No tienes permisos para crear reportes.',
+        ], 403);
+    } catch (\Throwable $e) {
+        Log::error('Error al guardar reporte: ' . $e->getMessage(), [
+            'file' => $e->getFile(),
+            'line' => $e->getLine(),
+        ]);
+
+        return response()->json([
+            'success' => false,
+            'message' => 'Error al guardar reporte: ' . $e->getMessage(),
+            'file' => $e->getFile(),
+            'line' => $e->getLine(),
+        ], 500);
     }
+}
 
-    public function show(Reporte $reporte): JsonResponse
+    public function show(Request $request, Reporte $reporte): JsonResponse
     {
-        $this->ensureOwnDependencia($reporte);
+        try {
+            $this->ensureOwnDependencia($request, $reporte);
 
-        return response()->json($reporte->load(['creador', 'responsable', 'ticket', 'servicio', 'area', 'equipo', 'ejecutores.usuario', 'materiales.material', 'evidencias', 'origen']));
+            $relations = ['creador', 'responsable', 'ticket', 'servicio', 'area', 'equipo', 'ejecutores.usuario', 'materiales.material', 'evidencias'];
+            if (method_exists($reporte, 'origen')) {
+                $relations[] = 'origen';
+            }
+            $reporte->loadMissing($relations);
+
+            return response()->json($reporte);
+        } catch (\Throwable $e) {
+            Log::error('Error en ReporteController::show: ' . $e->getMessage(), [
+                'exception' => $e,
+                'reporte_id' => $reporte->id ?? null,
+            ]);
+
+            return response()->json([
+                'message' => 'Error al cargar reporte: ' . $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ], 500);
+        }
     }
 
     public function update(Request $request, Reporte $reporte): JsonResponse
@@ -406,8 +588,10 @@ class ReporteController extends Controller
             'desarrollo' => 'sometimes|nullable|string',
             'estatus' => 'sometimes|in:abierto,parcial,finalizado,descartado',
             'categoria' => 'sometimes|in:preventivo,correctivo,diagnostico,instalacion,mejora',
+            'area_id' => 'sometimes|nullable|integer',
+            'es_retrabajo' => 'sometimes|boolean',
             'fecha_inicio' => 'sometimes|date',
-            'fecha_fin' => 'sometimes|date',
+            'fecha_fin' => 'sometimes|nullable|date',
             'hora_salida' => 'sometimes|nullable|date',
             'hora_llegada' => 'sometimes|nullable|date',
             'hora_inicio_diagnostico' => 'sometimes|nullable|date',
@@ -416,30 +600,99 @@ class ReporteController extends Controller
             'hora_regreso' => 'sometimes|nullable|date',
             'costo_mano_obra' => 'sometimes|numeric|min:0',
             'costo_materiales' => 'sometimes|numeric|min:0',
+            'ejecutores' => 'sometimes|array',
+            'ejecutores.*' => 'integer',
+            'keep_evidencias' => 'sometimes|array',
+            'keep_evidencias.*' => 'integer',
+            'evidencias' => 'sometimes|array|max:20',
+            'evidencias.*' => 'file|mimes:jpg,jpeg,png,gif,webp,pdf,csv,xls,xlsx|max:10240',
         ]);
 
-        // ReporteObserver sincroniza el estatus del ticket/servicio origen.
-        $reporte->update($data);
+        if (array_key_exists('fecha_fin', $data) && $data['fecha_fin'] === null) {
+            unset($data['fecha_fin']);
+        }
+        if (array_key_exists('area_id', $data)) {
+            $data['area_id'] = $this->resolveFk($request, 'area_id', Area::class);
+        }
 
-        return response()->json($reporte->load(['ejecutores', 'materiales']));
+        unset($data['ejecutores'], $data['keep_evidencias'], $data['evidencias']);
+
+        $user = $this->authUser($request);
+        $hasRutaColumn = Schema::hasColumn('reporte_evidencias', 'ruta');
+
+        DB::transaction(function () use ($request, $reporte, $data, $user, $hasRutaColumn) {
+            $reporte->forceFill($data)->save();
+            $this->sincronizarOrigen($reporte);
+
+            if ($request->boolean('sync_ejecutores') || $request->has('ejecutores')) {
+                $ejecutores = $this->resolveUserIds($request, 'ejecutores');
+                $reporte->ejecutores()->delete();
+                foreach ($ejecutores as $uid) {
+                    $reporte->ejecutores()->create([
+                        'dependencia_id' => $reporte->dependencia_id,
+                        'usuario_id' => $uid,
+                    ]);
+                }
+            }
+
+            if ($request->boolean('sync_evidencias')) {
+                $keepIds = array_map('intval', (array) $request->input('keep_evidencias', []));
+                if (empty($keepIds)) {
+                    $reporte->evidencias()->delete();
+                } else {
+                    $reporte->evidencias()->whereNotIn('id', $keepIds)->delete();
+                }
+            }
+
+            if ($request->hasFile('evidencias')) {
+                $carpetaEvidencias = 'evidencias/'.$reporte->dependencia_id;
+                foreach ($request->file('evidencias') as $file) {
+                    $mime = $file->getMimeType() ?: 'application/octet-stream';
+                    $isImage = str_starts_with($mime, 'image/');
+                    $carpeta = $carpetaEvidencias.'/'.($isImage ? 'imagenes' : 'documentos');
+                    $path = $file->store($carpeta, 'public');
+                    $url = Storage::disk('public')->url($path);
+
+                    $evPayload = [
+                        'dependencia_id' => $reporte->dependencia_id,
+                        'url' => $url,
+                        'tipo_archivo' => $mime,
+                        'peso_kb' => (int) ceil($file->getSize() / 1024),
+                        'subido_por' => $user->id,
+                    ];
+                    if ($hasRutaColumn) {
+                        $evPayload['ruta'] = $path;
+                        $evPayload['disco'] = 'public';
+                    }
+                    $reporte->evidencias()->create($evPayload);
+                }
+            }
+        });
+
+        return response()->json(
+            $reporte->load(['creador', 'responsable', 'ticket', 'servicio', 'area', 'equipo', 'ejecutores.usuario', 'materiales.material', 'evidencias', 'origen'])
+        );
     }
 
     public function destroy(Request $request, Reporte $reporte, InventarioService $inv): JsonResponse
     {
         $this->authorize('delete', $reporte);
+        $user = $this->authUser($request);
 
-        DB::transaction(function () use ($request, $reporte, $inv): void {
-            // Devolver al stock los materiales consumidos por el reporte.
-            /** @var \App\Models\ReporteMaterial $item */
+        DB::transaction(function () use ($user, $reporte, $inv): void {
             foreach ($reporte->materiales()->get() as $item) {
-                $inv->revertirSalida(
-                    $reporte->dependencia_id,
-                    (int) $item->material_id,
-                    (float) $item->cantidad,
-                    $reporte->id,
-                    $this->usuario($request)->id,
-                    'Devolución por eliminación del reporte '.$reporte->folio
-                );
+                try {
+                    $inv->revertirSalida(
+                        $reporte->dependencia_id,
+                        (int) $item->material_id,
+                        (float) $item->cantidad,
+                        $reporte->id,
+                        $user->id,
+                        'Devolución por eliminación del reporte '.$reporte->folio
+                    );
+                } catch (\Throwable $e) {
+                    report($e);
+                }
             }
 
             $reporte->delete();
@@ -468,32 +721,402 @@ class ReporteController extends Controller
         return response()->json($reporte);
     }
 
-    public function pdf(Reporte $reporte): Response
+    private function resolveInlineImage(?string $path, ?string $disk = null): ?string
     {
-        $this->ensureOwnDependencia($reporte);
+        $path = trim((string) ($path ?? ''));
+        if ($path === '' || \Illuminate\Support\Str::startsWith($path, 'data:')) {
+            return \Illuminate\Support\Str::startsWith($path, 'data:image') ? $path : null;
+        }
 
-        $reporte->load(['creador', 'responsable', 'ticket', 'servicio', 'area', 'equipo', 'ejecutores.usuario', 'materiales.material', 'evidencias']);
+        $uploads = app(\App\Services\UploadStorageService::class);
+        if (method_exists($uploads, 'inlineImage')) {
+            try {
+                $res = $uploads->inlineImage($path, $disk);
+                if ($res) return $res;
+            } catch (\Throwable) {
+                // continuar al fallback directo
+            }
+        }
+
+        // Fallback directo leyendo el archivo de almacenamiento
+        try {
+            $cleanPath = ltrim($path, '/');
+            if (\Illuminate\Support\Str::startsWith($cleanPath, 'storage/')) {
+                $cleanPath = substr($cleanPath, strlen('storage/'));
+            }
+            $diskName = $disk ?: (method_exists($uploads, 'diskName') ? $uploads->diskName() : 'public');
+            if (Storage::disk($diskName)->exists($cleanPath)) {
+                $bytes = Storage::disk($diskName)->get($cleanPath);
+                if (is_string($bytes) && $bytes !== '') {
+                    $mime = (new \finfo(FILEINFO_MIME_TYPE))->buffer($bytes) ?: 'image/jpeg';
+                    return 'data:'.$mime.';base64,'.base64_encode($bytes);
+                }
+            }
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return null;
+    }
+
+    public function renderPdfObject(Reporte $reporte): mixed
+    {
+        $reporte->loadMissing(['creador', 'responsable', 'ticket', 'servicio', 'area', 'equipo', 'ejecutores.usuario', 'materiales.material', 'evidencias', 'dependencia']);
+        $rawDesarrollo = (string) ($reporte->desarrollo ?? '');
+        $meta = [];
+        if (preg_match('/<!--CORE_META:([\s\S]*?)-->\s*$/', $rawDesarrollo, $m)) {
+            $decoded = json_decode($m[1], true);
+            if (is_array($decoded)) {
+                $meta = $decoded;
+            }
+        }
+        $cleanDesarrollo = trim((string) preg_replace('/\n*<!--CORE_META:([\s\S]*?)-->\s*$/', '', $rawDesarrollo));
         $empresa = $reporte->dependencia;
 
-        // Logo y evidencias se incrustan como data-URI leidos del disco: el
-        // render del PDF no descarga URLs, asi que una referencia remota del
-        // cliente no puede usarse para pedir recursos de la red interna (SSRF).
-        $logo = $empresa?->logo_ruta
-            ? $this->uploads->inlineImage($empresa->logo_ruta, $empresa->logo_disco ?: null)
-            : $this->uploads->inlineImage($empresa?->logo);
+        $logoSrc = null;
+        if ($empresa?->logo_ruta) {
+            $logoSrc = $this->resolveInlineImage($empresa->logo_ruta, $empresa->logo_disco);
+        } elseif ($empresa?->logo) {
+            $logoSrc = $this->resolveInlineImage($empresa->logo);
+        }
 
-        $pdf = Pdf::setOption([
-            'isRemoteEnabled' => false,
-            'isHtml5ParserEnabled' => true,
-            'defaultFont' => 'DejaVu Sans',
-            'chroot' => base_path(),
-        ])->loadView('reportes.pdf', [
-            'reporte' => $reporte,
-            'empresa' => $empresa,
-            'logo' => $logo,
-            'generado' => now(),
-        ])->setPaper('letter', 'portrait');
+        $e = fn ($val) => htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8');
+        $empresaNombre = $e($empresa?->nombre ?? 'CoreReports');
+        $folio = $e($reporte->folio);
+        $creador = $e($reporte->creador ? trim($reporte->creador->nombre.' '.$reporte->creador->apellidos) : '—');
+        $puesto = $e($meta['cargo'] ?? ($reporte->creador?->puesto ?? 'Especialista Técnico'));
+        $numEmpleado = $e($reporte->creador?->numero_empleado ?? str_pad((string) ($reporte->creador?->id ?? '001'), 3, '0', STR_PAD_LEFT));
+        $correo = $e($reporte->creador?->email ?? $empresa?->email ?? '—');
+        $fecha = $reporte->fecha_inicio ? $reporte->fecha_inicio->format('Y-m-d') : ($reporte->created_at ? $reporte->created_at->format('Y-m-d') : '—');
 
-        return $pdf->download($reporte->folio.'.pdf');
+        $origenFolio = $e(preg_replace('/^(Ticket|Servicio):\s*/i', '', (string) ($reporte->ticket?->folio ?? $reporte->servicio?->folio ?? '0000')));
+        $areaNombre = $e($meta['areaTexto'] ?? ($reporte->area?->nombre ?? 'Área General'));
+        $responsableArea = $e($meta['responsable'] ?? ($reporte->responsable ? trim($reporte->responsable->nombre.' '.$reporte->responsable->apellidos) : '—'));
+
+        $categoria = $e(ucfirst((string) ($reporte->categoria ?? '—')));
+        $fallaRaw = $meta['falla'] ?? $meta['fallaLibre'] ?? ($reporte->ticket?->asunto ?? 'Sin falla reportada.');
+        $conclusionRaw = $meta['conclusion'] ?? ($reporte->estatus === 'finalizado' ? 'Trabajo finalizado satisfactoriamente.' : 'Trabajo en proceso, pendiente de finalización.');
+
+        $formatParagraphs = function ($text, $fallback = 'Sin información.') use ($e) {
+            $raw = trim((string) $text);
+            if ($raw === '') return '<p style="margin:0 0 10px 0;line-height:1.6;text-align:justify;color:#1e293b;font-size:9.5pt;">'.$fallback.'</p>';
+            $lines = preg_split('/\r?\n+/', $raw);
+            $lines = array_filter(array_map('trim', $lines));
+            if (empty($lines)) return '<p style="margin:0 0 10px 0;line-height:1.6;text-align:justify;color:#1e293b;font-size:9.5pt;">'.$fallback.'</p>';
+            $out = '';
+            foreach ($lines as $line) {
+                $out .= '<p style="margin:0 0 12px 0;line-height:1.6;text-align:justify;color:#1e293b;font-size:9.5pt;">'.$e($line).'</p>';
+            }
+            return $out;
+        };
+
+        $fallaHtml = $formatParagraphs($fallaRaw, 'Sin falla reportada.');
+        $desarrolloHtml = $formatParagraphs($cleanDesarrollo, 'Sin descripción de actividades.');
+        $conclusionHtml = $formatParagraphs($conclusionRaw, 'Trabajo en proceso, pendiente de finalización.');
+
+        $inicio = $reporte->fecha_inicio ? $reporte->fecha_inicio->format('H:i') : '--:--';
+        $fin = $reporte->fecha_fin ? $reporte->fecha_fin->format('H:i') : '--:--';
+
+        $totalHoras = '0h 0m';
+        if ($reporte->fecha_inicio && $reporte->fecha_fin) {
+            $diffMins = $reporte->fecha_inicio->diffInMinutes($reporte->fecha_fin);
+            $h = floor($diffMins / 60);
+            $m = $diffMins % 60;
+            $totalHoras = "{$h}h {$m}m";
+        }
+
+        // Materiales
+        $matsHtml = '';
+        if ($reporte->materiales->isNotEmpty()) {
+            $matsRows = '';
+            foreach ($reporte->materiales as $idx => $mat) {
+                $nom = $e($mat->material?->nombre ?? 'Material');
+                $cant = $e($mat->cantidad);
+                $unidad = $e($mat->material?->unidad_medida ?? 'Pza');
+                $num = $idx + 1;
+                $matsRows .= "<tr><td style=\"padding:4px;border:1px solid #000;text-align:center;\">{$num}</td><td style=\"padding:4px;border:1px solid #000;\">{$nom}</td><td style=\"padding:4px;border:1px solid #000;text-align:center;\">{$cant}</td><td style=\"padding:4px;border:1px solid #000;text-align:center;\">{$unidad}</td></tr>";
+            }
+            $matsHtml = "<div style=\"font-weight:bold;font-size:10pt;margin-top:12px;margin-bottom:6px;\">MATERIALES UTILIZADOS</div><table style=\"width:100%;border-collapse:collapse;margin-bottom:14px;font-size:9pt;\"><thead><tr style=\"background:#f1f5f9;\"><th style=\"border:1px solid #000;padding:4px;width:40px;\">Item</th><th style=\"border:1px solid #000;padding:4px;text-align:left;\">Descripción</th><th style=\"border:1px solid #000;padding:4px;width:70px;\">Cantidad</th><th style=\"border:1px solid #000;padding:4px;width:70px;\">Unidad</th></tr></thead><tbody>{$matsRows}</tbody></table>";
+        }
+
+        // Evidencias (2 por fila)
+        $evidsHtml = '';
+        if ($reporte->evidencias->isNotEmpty()) {
+            $evidsRows = '';
+            foreach ($reporte->evidencias->chunk(2) as $pair) {
+                $evidsRows .= '<tr style="page-break-inside:avoid;">';
+                foreach ($pair as $item) {
+                    $imgData = null;
+                    try {
+                        $imgData = $item->pdfImage();
+                    } catch (\Throwable) {
+                        $imgData = $this->resolveInlineImage($item->ruta ?: $item->url, $item->disco);
+                    }
+                    $coment = $e($item->comentario ?? '');
+                    $evidsRows .= '<td style="width:50%;padding:4px 8px 12px 0;vertical-align:top;">';
+                    if ($imgData) {
+                        $evidsRows .= "<div style=\"border:1px solid #94a3b8;padding:2px;text-align:center;\"><img src=\"{$imgData}\" style=\"max-height:190px;max-width:100%;\" /></div>";
+                    }
+                    $evidsRows .= "<div style=\"font-size:8.5pt;margin-top:4px;\">{$coment}</div>";
+                    $evidsRows .= '</td>';
+                }
+                if ($pair->count() === 1) {
+                    $evidsRows .= '<td style="width:50%;"></td>';
+                }
+                $evidsRows .= '</tr>';
+            }
+            $evidsHtml = "<div style=\"font-weight:bold;font-size:10pt;margin-top:14px;margin-bottom:10px;\">EVIDENCIA FOTOGRÁFICA</div><table style=\"width:100%;border-collapse:collapse;\">{$evidsRows}</table>";
+        }
+
+        $logoHtml = $logoSrc
+            ? "<img src=\"{$logoSrc}\" style=\"max-height:60px;max-width:90%;\" />"
+            : "<div style=\"font-size:18px;font-weight:bold;\">".substr($empresaNombre, 0, 4)."</div>";
+
+        $html = "<!DOCTYPE html><html lang=\"es\"><head><meta charset=\"UTF-8\"><style>
+            * { box-sizing: border-box; }
+            body { font-family: DejaVu Sans, sans-serif; font-size: 9.5pt; color: #000000; margin: 0; padding: 18px 24px; line-height: 1.45; }
+            .header-box { width: 100%; border-collapse: collapse; border: 2px solid #000000; margin-bottom: 18px; }
+            .header-logo-td { width: 27%; border-right: 2px solid #000000; text-align: center; vertical-align: middle; padding: 6px; }
+            .header-info-td { width: 73%; padding: 0; vertical-align: middle; }
+            .header-company-title { font-size: 13pt; font-weight: bold; text-align: center; padding: 6px 4px; border-bottom: 2px solid #000000; text-transform: uppercase; }
+            .header-folio-bar { background: #9ca3af; color: #ffffff; font-size: 11pt; font-weight: bold; text-align: center; padding: 4px; border-bottom: 2px solid #000000; }
+            .header-report-title { font-size: 9.5pt; font-weight: bold; text-align: center; padding: 4px; text-transform: uppercase; }
+            .section-heading { font-weight: bold; font-size: 10pt; margin-top: 14px; margin-bottom: 6px; text-transform: uppercase; color: #000000; }
+            .section-content { font-size: 9.5pt; margin-bottom: 14px; }
+            .meta-grid-table { width: 100%; border-collapse: collapse; font-size: 9.5pt; margin-bottom: 12px; }
+            .meta-grid-table td { padding: 2px 4px; vertical-align: top; }
+            .separator-line { border: none; border-top: 2px solid #000000; margin: 14px 0; }
+            .tiempos-line { font-size: 9.5pt; margin-top: 12px; margin-bottom: 14px; }
+            .signatures-wrap { margin-top: 40px; page-break-inside: avoid; }
+            .sig-table { width: 100%; border-collapse: collapse; }
+            .sig-td { width: 44%; vertical-align: bottom; }
+            .sig-label { font-size: 10pt; font-weight: bold; margin-bottom: 28px; }
+            .sig-line { border-top: 1px solid #000000; width: 100%; }
+            .sig-subtext { text-align: center; font-size: 8pt; font-weight: bold; letter-spacing: 0.5px; margin-top: 4px; }
+            .footer-caption { text-align: center; font-size: 7.5pt; font-style: italic; color: #64748b; margin-top: 20px; }
+        </style></head><body>
+            <table class=\"header-box\">
+                <tr>
+                    <td class=\"header-logo-td\">{$logoHtml}</td>
+                    <td class=\"header-info-td\">
+                        <div class=\"header-company-title\">{$empresaNombre}</div>
+                        <div class=\"header-folio-bar\">{$folio}</div>
+                        <div class=\"header-report-title\">REPORTE DE MANTENIMIENTO / ORDEN DE TRABAJO ({$categoria})</div>
+                    </td>
+                </tr>
+            </table>
+
+            <div class=\"section-heading\">DATOS GENERALES</div>
+            <table class=\"meta-grid-table\">
+                <tr><td style=\"width:50%;\"><b>Responsable:</b> {$creador}</td><td style=\"width:50%;\"><b>OT/OC/Ticket:</b> {$origenFolio}</td></tr>
+                <tr><td><b>Puesto:</b> {$puesto}</td><td><b>Fecha de solicitud:</b> {$fecha}</td></tr>
+                <tr><td><b>No. Empleado:</b> {$numEmpleado}</td><td><b>Area:</b> {$areaNombre}</td></tr>
+                <tr><td><b>Fecha:</b> {$fecha}</td><td><b>Responsable de Area:</b> {$responsableArea}</td></tr>
+                <tr><td><b>Correos:</b> {$correo}</td><td></td></tr>
+            </table>
+
+            <hr class=\"separator-line\" />
+
+            <div class=\"section-heading\">DESCRIPCIÓN DE LA FALLA REPORTADA</div>
+            <div class=\"section-content\">{$fallaHtml}</div>
+
+            <div class=\"section-heading\">DESCRIPCIÓN DEL SERVICIO</div>
+            <div class=\"section-content\">{$desarrolloHtml}</div>
+
+            <div class=\"section-heading\">CONCLUSIÓN DEL SERVICIO</div>
+            <div class=\"section-content\">{$conclusionHtml}</div>
+
+            <div class=\"tiempos-line\">
+                <b>Tiempos:</b> &nbsp;&nbsp;&nbsp;&nbsp; <b>Inicio:</b> {$inicio} &nbsp;&nbsp;&nbsp;&nbsp; <b>Fin:</b> {$fin} &nbsp;&nbsp;&nbsp;&nbsp; <b>Total:</b> {$totalHoras}
+            </div>
+
+            {$matsHtml}
+            {$evidsHtml}
+
+            <div class=\"signatures-wrap\">
+                <table class=\"sig-table\">
+                    <tr>
+                        <td class=\"sig-td\">
+                            <div class=\"sig-label\">Reviso:</div>
+                            <div class=\"sig-line\"></div>
+                            <div class=\"sig-subtext\">NOMBRE Y FIRMA</div>
+                        </td>
+                        <td style=\"width:12%;\"></td>
+                        <td class=\"sig-td\">
+                            <div class=\"sig-label\">Elaboro:</div>
+                            <div class=\"sig-line\"></div>
+                            <div class=\"sig-subtext\">NOMBRE Y FIRMA</div>
+                        </td>
+                    </tr>
+                </table>
+                <div class=\"footer-caption\">Generado con CoreReports para {$empresaNombre}</div>
+            </div>
+        </body></html>";
+
+        // 1. Barryvdh\DomPDF\Facade\Pdf (versión moderna 2.x / 3.x)
+        if (class_exists('Barryvdh\\DomPDF\\Facade\\Pdf')) {
+            $facadeClass = 'Barryvdh\\DomPDF\\Facade\\Pdf';
+            $pdf = $facadeClass::loadHTML($html)->setPaper('letter', 'portrait');
+            if (method_exists($pdf, 'setOptions')) {
+                $pdf->setOptions(['isRemoteEnabled' => false, 'isHtml5ParserEnabled' => true, 'defaultFont' => 'DejaVu Sans']);
+            }
+            return $pdf;
+        }
+
+        // 2. Barryvdh\DomPDF\Facade (versión clásica 0.x / 1.x)
+        if (class_exists('Barryvdh\\DomPDF\\Facade')) {
+            $facadeClass = 'Barryvdh\\DomPDF\\Facade';
+            $pdf = $facadeClass::loadHTML($html)->setPaper('letter', 'portrait');
+            if (method_exists($pdf, 'setOptions')) {
+                $pdf->setOptions(['isRemoteEnabled' => false, 'isHtml5ParserEnabled' => true, 'defaultFont' => 'DejaVu Sans']);
+            }
+            return $pdf;
+        }
+
+        // 3. Alias global 'PDF'
+        if (class_exists('PDF')) {
+            $pdf = \PDF::loadHTML($html)->setPaper('letter', 'portrait');
+            if (method_exists($pdf, 'setOptions')) {
+                $pdf->setOptions(['isRemoteEnabled' => false, 'isHtml5ParserEnabled' => true, 'defaultFont' => 'DejaVu Sans']);
+            }
+            return $pdf;
+        }
+
+        // 4. Contenedor IoC de Laravel 'dompdf.wrapper'
+        if (app()->bound('dompdf.wrapper')) {
+            $pdf = app('dompdf.wrapper')->loadHTML($html)->setPaper('letter', 'portrait');
+            if (method_exists($pdf, 'setOptions')) {
+                $pdf->setOptions(['isRemoteEnabled' => false, 'isHtml5ParserEnabled' => true, 'defaultFont' => 'DejaVu Sans']);
+            }
+            return $pdf;
+        }
+
+        // 5. Registrar ServiceProvider manualmente si la clase existe pero no fue autodescubierta
+        if (class_exists('Barryvdh\\DomPDF\\ServiceProvider')) {
+            try {
+                app()->register('Barryvdh\\DomPDF\\ServiceProvider');
+                if (app()->bound('dompdf.wrapper')) {
+                    $pdf = app('dompdf.wrapper')->loadHTML($html)->setPaper('letter', 'portrait');
+                    return $pdf;
+                }
+            } catch (\Throwable) {
+                // Continuar a otros métodos
+            }
+        }
+
+        // 6. Dompdf nativo (dompdf/dompdf)
+        if (!class_exists('Dompdf\\Dompdf')) {
+            $manualAutoload = base_path('vendor/dompdf/dompdf/src/Autoloader.php');
+            if (file_exists($manualAutoload)) {
+                require_once $manualAutoload;
+                if (class_exists('Dompdf\\Autoloader')) {
+                    \Dompdf\Autoloader::register();
+                }
+            }
+        }
+
+        if (class_exists('Dompdf\\Dompdf')) {
+            $options = class_exists('Dompdf\\Options')
+                ? new \Dompdf\Options([
+                    'isRemoteEnabled' => false,
+                    'isHtml5ParserEnabled' => true,
+                    'defaultFont' => 'DejaVu Sans',
+                ])
+                : null;
+            $dompdf = $options ? new \Dompdf\Dompdf($options) : new \Dompdf\Dompdf();
+            $dompdf->loadHtml($html);
+            $dompdf->setPaper('letter', 'portrait');
+            $dompdf->render();
+
+            return new class($dompdf) {
+                public function __construct(private \Dompdf\Dompdf $dompdf) {}
+                public function output(): string {
+                    return (string) $this->dompdf->output();
+                }
+                public function download(string $filename = 'document.pdf') {
+                    return response($this->output(), 200, [
+                        'Content-Type' => 'application/pdf',
+                        'Content-Disposition' => "attachment; filename=\"{$filename}\"",
+                    ]);
+                }
+            };
+        }
+
+        // 7. Fallback nativo: si DomPDF no está en vendor, usar ReportePdfService (cero dependencias externas)
+        return new \App\Services\ReportePdfService($reporte);
+    }
+
+    public function pdf(Request $request, Reporte $reporte): Response
+    {
+        $this->ensureOwnDependencia($request, $reporte);
+
+        try {
+            $pdf = $this->renderPdfObject($reporte);
+            return $pdf->download($reporte->folio.'.pdf');
+        } catch (\Throwable $e) {
+            Log::warning('renderPdfObject falló para reporte '.$reporte->id.', usando ReportePdfService nativo: '.$e->getMessage());
+            try {
+                $nativePdf = new \App\Services\ReportePdfService($reporte);
+                return $nativePdf->download($reporte->folio.'.pdf');
+            } catch (\Throwable $e2) {
+                Log::error('ReportePdfService también falló: '.$e2->getMessage());
+                abort(500, 'Error al generar el PDF: '.$e->getMessage());
+            }
+        }
+    }
+
+    public function enviarCorreo(Request $request, Reporte $reporte): JsonResponse
+    {
+        $this->ensureOwnDependencia($request, $reporte);
+
+        $request->validate([
+            'destinatarios' => 'required|array|min:1',
+            'destinatarios.*' => 'required|email',
+            'comentario' => 'nullable|string|max:500',
+        ]);
+
+        $destinatarios = array_values(array_filter(
+            array_map('trim', (array) $request->input('destinatarios')),
+            fn ($email) => filter_var($email, FILTER_VALIDATE_EMAIL)
+        ));
+
+        if (empty($destinatarios)) {
+            return response()->json(['message' => 'Proporciona al menos un correo electrónico válido.'], 422);
+        }
+
+        try {
+            $pdfContent = $this->renderPdfObject($reporte)->output();
+            $comentario = $request->input('comentario');
+
+            $mailer = config('mail.default');
+            $fromAddress = config('mail.from.address');
+
+            Mail::to($destinatarios)->send(new ReportePdfMail($reporte, $pdfContent, $comentario));
+
+            if ($mailer === 'log') {
+                return response()->json([
+                    'message' => 'ATENCIÓN: El servidor tiene MAIL_MAILER=log en el archivo .env. El correo se guardó en el log del servidor (storage/logs/laravel.log) pero NO se transmitió por internet. Configure el SMTP en el archivo .env de IONOS.',
+                    'destinatarios' => $destinatarios,
+                    'mailer' => $mailer,
+                    'from' => $fromAddress,
+                ]);
+            }
+
+            return response()->json([
+                'message' => 'Reporte en PDF enviado exitosamente por correo.',
+                'destinatarios' => $destinatarios,
+                'mailer' => $mailer,
+                'from' => $fromAddress,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('Error al enviar reporte por correo: ' . $e->getMessage(), [
+                'reporte_id' => $reporte->id,
+                'destinatarios' => $destinatarios,
+            ]);
+
+            return response()->json([
+                'message' => 'No se pudo enviar el correo: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 }

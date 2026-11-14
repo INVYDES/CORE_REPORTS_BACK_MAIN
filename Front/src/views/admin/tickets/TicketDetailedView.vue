@@ -1,5 +1,5 @@
 <script setup lang="ts">
-  import { ref, onMounted } from 'vue'
+  import { ref, onMounted, computed } from 'vue'
   import { useRoute, useRouter } from 'vue-router'
   import {
     ArrowLeft,
@@ -9,8 +9,12 @@
     Clock,
     CheckCircle2,
     AlertCircle,
+    Camera,
+    ExternalLink,
+    X,
   } from 'lucide-vue-next'
   import client from '../../../api/client'
+  import { formatLocalDateTime } from '../../../utils/reportMeta'
   import { useAuthStore } from '../../../stores/authStore'
   import { storeToRefs } from 'pinia'
 
@@ -44,17 +48,36 @@
     (({ alta: 'Alta', media: 'Media', baja: 'Baja' }) as any)[code || ''] || code || '—'
   const fmt = (iso?: string | null) => {
     if (!iso) return ''
-    const d = new Date(iso)
-    return isNaN(d.getTime())
-      ? String(iso).replace('T', ' ').slice(0, 16)
-      : d.toLocaleString('es-MX', {
-          year: 'numeric',
-          month: '2-digit',
-          day: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit',
-        })
+    return formatLocalDateTime(iso)
   }
+
+  // 3. Evidencias fotográficas adjuntas en la descripción
+  const activeLightbox = ref<string | null>(null)
+
+  const parsedDescription = computed(() => {
+    const raw = ticket.value?.descripcion || ''
+    if (!raw) return { cleanText: '', images: [] as string[] }
+
+    // Detectar URLs directas de imágenes (jpg, jpeg, png, webp, gif)
+    const urlRegex = /(https?:\/\/[^\s"'<>]+\.(?:jpg|jpeg|png|webp|gif)(?:\?[^\s"'<>]*)?)/gi
+    const matches = raw.match(urlRegex) || []
+    const images = Array.from(new Set(matches))
+
+    // Limpiar el texto: quitar bloque de evidencias fotográficas para que no se vea como texto feo y remover emojis
+    let cleanText = raw
+      .replace(/[📷]?\s*Evidencias Fotográficas Adjuntas:[\s\S]*$/i, '')
+      .replace(/-?\s*Foto\s*\d+:?\s*https?:\/\/[^\s]+/gi, '')
+      .replace(/(https?:\/\/[^\s"'<>]+\.(?:jpg|jpeg|png|webp|gif)(?:\?[^\s"'<>]*)?)/gi, '')
+      .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '')
+      .replace(/[🏢👤📞✉️📋📷📌📍📎🏷️🔍⚡⚠️✅❌]/gu, '')
+      .replace(/^[ \t]+/gm, '')
+      .trim()
+
+    return {
+      cleanText: cleanText || raw,
+      images,
+    }
+  })
 
   const applyTicket = (raw: any) => {
     const dep =
@@ -63,14 +86,23 @@
       ticket.value = null
       return
     }
+    const rawReportes = Array.isArray(raw.reportes) ? raw.reportes : []
+    const finalReport =
+      rawReportes.slice().reverse().find((r: any) => String(r.estatus || '').toLowerCase() === 'finalizado') ||
+      rawReportes[rawReportes.length - 1] ||
+      null
+    const hasFinalizadoReport = Boolean(finalReport && String(finalReport.estatus || '').toLowerCase() === 'finalizado')
     ticket.value = {
       id: raw.id,
       folio: raw.folio,
       asunto: raw.asunto,
       descripcion: raw.descripcion || '',
       solicitante: raw.solicitante || '—',
-      cargo: raw.cargo || '',
-      estatus: statusLabel(raw.estatus),
+      cargo: (raw.cargo || '')
+        .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '')
+        .replace(/[🏢👤📞✉️📋📷📌📍📎🏷️🔍⚡⚠️✅❌]/gu, '')
+        .trim(),
+      estatus: hasFinalizadoReport ? 'Resuelto' : statusLabel(raw.estatus),
       prioridad: priorityLabel(raw.prioridad),
       atendio: raw.asignado
         ? `${raw.asignado.nombre || ''} ${raw.asignado.apellidos || ''}`.trim()
@@ -78,6 +110,15 @@
       usuarioAsignadoId: raw.usuario_asignado_id ?? null,
       fechaSolicitud: fmt(raw.fecha_solicitud),
       fechaAtencion: fmt(raw.fecha_atencion),
+      reportes: rawReportes.map((r: any) => ({
+        id: r.id,
+        folio: r.folio,
+        estatus: String(r.estatus || '').toLowerCase(),
+        fecha: r.fecha_inicio || r.created_at || '',
+        creadoPor: r.creado_por,
+      })),
+      reporteAsociadoId: finalReport?.id ?? null,
+      reporteAsociadoFolio: finalReport?.folio ?? null,
       historialModificaciones: [],
     }
   }
@@ -92,6 +133,7 @@
     try {
       const res = await client.get('/tecnicos').then(r => r.data)
       const list = res.data || res || []
+      allUsers.value = Array.isArray(list) ? list : []
       const dep =
         (currentUser.value as any)?.dependencia_id ?? (currentUser.value as any)?.idDependencia
       technicians.value = (Array.isArray(list) ? list : [])
@@ -123,10 +165,12 @@
 
   const availableTechnicians = technicians
 
+  const allUsers = ref<any[]>([])
+
   const getUserName = (id: number | null) => {
     if (!id) return 'Sin Asignar'
-    const t = technicians.value.find((u: any) => u.id === id)
-    return t ? `${t.nombre} ${t.apellidos}` : 'Usuario Desconocido'
+    const t = allUsers.value.find((u: any) => u.id === id) || technicians.value.find((u: any) => u.id === id)
+    return t ? `${t.nombre} ${t.apellidos}`.trim() : 'Usuario Desconocido'
   }
 
   const formatDate = (dateString: string) => {
@@ -138,6 +182,23 @@
       day: '2-digit',
       hour: '2-digit',
       minute: '2-digit',
+    })
+  }
+
+  const isTicketResolved = computed(() => {
+    if (!ticket.value) return false
+    const st = String(ticket.value.estatus || '').toLowerCase()
+    return st === 'resuelto' || st === 'cerrado' || Boolean(ticket.value.reporteAsociadoId)
+  })
+
+  const goToCreateReport = () => {
+    if (!ticket.value || isTicketResolved.value) return
+    router.push({
+      name: 'reports-new',
+      query: {
+        tipo: 'Ticket',
+        origenId: String(ticket.value.id),
+      },
     })
   }
 </script>
@@ -153,10 +214,23 @@
           <span>Regresar a la lista</span>
         </button>
 
-        <!-- Folio -->
-        <div class="header-title">
-          <span class="folio-badge">{{ ticket.folio }}</span>
-          <h1>{{ ticket.asunto }}</h1>
+        <!-- Folio & Actions -->
+        <div
+          style="display: flex; justify-content: space-between; align-items: flex-end; gap: 1rem; flex-wrap: wrap;"
+        >
+          <div class="header-title">
+            <span class="folio-badge">{{ ticket.folio }}</span>
+            <h1>{{ ticket.asunto }}</h1>
+          </div>
+          <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+            <button
+              v-if="!isTicketResolved && (currentUser?.rol === 1 || currentUser?.rol === 3)"
+              @click="goToCreateReport"
+              style="background: #2563eb; border: none; color: #ffffff; padding: 10px 18px; border-radius: 8px; font-size: 0.9rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);"
+            >
+              📝 Crear Reporte
+            </button>
+          </div>
         </div>
       </header>
 
@@ -207,7 +281,81 @@
         <div class="main-column">
           <div class="card description-card">
             <h2>Descripción del Reporte</h2>
-            <p class="description-text">{{ ticket.descripcion }}</p>
+            <p class="description-text">{{ parsedDescription.cleanText }}</p>
+
+            <!-- Galería de Evidencias Fotográficas Adjuntas -->
+            <div v-if="parsedDescription.images.length > 0" class="evidence-gallery-section">
+              <div class="evidence-header">
+                <Camera :size="18" class="evidence-icon" />
+                <h3>Evidencias Fotográficas Adjuntas ({{ parsedDescription.images.length }})</h3>
+              </div>
+              <div class="evidence-grid">
+                <div
+                  v-for="(imgUrl, idx) in parsedDescription.images"
+                  :key="idx"
+                  class="evidence-card"
+                  @click="activeLightbox = imgUrl"
+                >
+                  <div class="evidence-thumb-container">
+                    <img :src="imgUrl" :alt="'Evidencia ' + (idx + 1)" class="evidence-thumb" loading="lazy" />
+                    <div class="evidence-overlay">
+                      <span class="zoom-pill">Ampliar foto</span>
+                    </div>
+                  </div>
+                  <div class="evidence-card-footer">
+                    <span class="evidence-label">Foto {{ idx + 1 }}</span>
+                    <a
+                      :href="imgUrl"
+                      target="_blank"
+                      rel="noopener"
+                      @click.stop
+                      class="evidence-ext-link"
+                      title="Abrir imagen en pestaña nueva"
+                    >
+                      <ExternalLink :size="14" />
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Linked Reports Section -->
+          <div v-if="ticket.reportes && ticket.reportes.length > 0" class="card" style="margin-bottom: 1.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.85rem; border-bottom: 1px solid #f1f5f9; padding-bottom: 0.5rem;">
+              <h2 style="font-size: 1.05rem; color: #0f172a; margin: 0; font-weight: 700;">
+                Reportes de Trabajo Vinculados ({{ ticket.reportes.length }})
+              </h2>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 0.6rem;">
+              <div
+                v-for="rep in ticket.reportes"
+                :key="rep.id"
+                style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; gap: 1rem; flex-wrap: wrap;"
+              >
+                <div style="display: flex; flex-direction: column; gap: 3px;">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-weight: 700; color: #0f172a; font-size: 0.95rem;">{{ rep.folio }}</span>
+                    <span
+                      class="status-pill"
+                      style="font-size: 0.7rem; padding: 2px 8px; border-radius: 12px; font-weight: 700;"
+                      :class="rep.estatus === 'finalizado' ? 'pill-success' : 'pill-warning'"
+                    >
+                      {{ rep.estatus === 'finalizado' ? 'FINALIZADO' : 'TRABAJO PARCIAL' }}
+                    </span>
+                  </div>
+                  <span style="font-size: 0.8rem; color: #64748b;">
+                    Elaboró: {{ getUserName(rep.creadoPor) }} • {{ formatDate(rep.fecha) }}
+                  </span>
+                </div>
+                <button
+                  @click="router.push({ name: 'report-detail', params: { id: rep.id } })"
+                  style="background: #ffffff; border: 1px solid #cbd5e1; color: #1e40af; padding: 6px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;"
+                >
+                  👁️ Ver Reporte
+                </button>
+              </div>
+            </div>
           </div>
 
           <!-- History Timeline -->
@@ -304,6 +452,34 @@
       <p>El ticket con este ID no existe o no te pertenece.</p>
       <button @click="goBack" class="btn-back mt-4">Regresar a la lista</button>
     </div>
+
+    <!-- Lightbox Modal para ver la foto en alta resolución -->
+    <Teleport to="body">
+      <div
+        v-if="activeLightbox"
+        class="lightbox-backdrop"
+        @click="activeLightbox = null"
+      >
+        <div class="lightbox-dialog" @click.stop>
+          <button class="lightbox-close-btn" @click="activeLightbox = null" title="Cerrar">
+            <X :size="22" />
+          </button>
+          <div class="lightbox-image-wrapper">
+            <img :src="activeLightbox" alt="Evidencia en tamaño completo" class="lightbox-image" />
+          </div>
+          <div class="lightbox-footer">
+            <a
+              :href="activeLightbox"
+              target="_blank"
+              rel="noopener"
+              class="btn-open-original"
+            >
+              <ExternalLink :size="15" /> Abrir imagen original en nueva pestaña
+            </a>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -413,6 +589,126 @@
       line-height: 1.6;
       font-size: 1rem;
       white-space: pre-wrap;
+    }
+
+    .evidence-gallery-section {
+      margin-top: 1.5rem;
+      padding-top: 1.25rem;
+      border-top: 1px solid #f1f5f9;
+    }
+
+    .evidence-header {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.85rem;
+
+      h3 {
+        margin: 0;
+        font-size: 0.95rem;
+        font-weight: 700;
+        color: #0f172a;
+      }
+
+      .evidence-icon {
+        color: #2563eb;
+      }
+    }
+
+    .evidence-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 1rem;
+    }
+
+    .evidence-card {
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+
+      &:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.12);
+        border-color: #93c5fd;
+
+        .evidence-thumb {
+          transform: scale(1.04);
+        }
+
+        .evidence-overlay {
+          opacity: 1;
+        }
+      }
+    }
+
+    .evidence-thumb-container {
+      position: relative;
+      width: 100%;
+      height: 140px;
+      background: #f1f5f9;
+      overflow: hidden;
+    }
+
+    .evidence-thumb {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      transition: transform 0.25s ease;
+    }
+
+    .evidence-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+    }
+
+    .zoom-pill {
+      background: rgba(255, 255, 255, 0.95);
+      color: #0f172a;
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 5px 10px;
+      border-radius: 20px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+    }
+
+    .evidence-card-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      background: #f8fafc;
+      border-top: 1px solid #f1f5f9;
+    }
+
+    .evidence-label {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #334155;
+    }
+
+    .evidence-ext-link {
+      color: #64748b;
+      display: inline-flex;
+      align-items: center;
+      padding: 3px;
+      border-radius: 4px;
+      transition: color 0.15s, background-color 0.15s;
+
+      &:hover {
+        color: #2563eb;
+        background: #eff6ff;
+      }
     }
   }
 
@@ -703,5 +999,101 @@
     .header-title {
       word-break: break-word;
     }
+  }
+
+  /* Lightbox Styles */
+  .lightbox-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.88);
+    backdrop-filter: blur(4px);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    animation: fadeIn 0.2s ease;
+  }
+
+  .lightbox-dialog {
+    position: relative;
+    max-width: 90vw;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: #0f172a;
+    border-radius: 12px;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+  }
+
+  .lightbox-close-btn {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    background: rgba(15, 23, 42, 0.75);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background-color 0.15s;
+    z-index: 10;
+
+    &:hover {
+      background: #ef4444;
+    }
+  }
+
+  .lightbox-image-wrapper {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    max-width: 85vw;
+    max-height: 75vh;
+    padding: 1rem;
+  }
+
+  .lightbox-image {
+    max-width: 100%;
+    max-height: 70vh;
+    object-fit: contain;
+    border-radius: 6px;
+  }
+
+  .lightbox-footer {
+    width: 100%;
+    padding: 10px 16px;
+    background: #1e293b;
+    display: flex;
+    justify-content: center;
+  }
+
+  .btn-open-original {
+    color: #93c5fd;
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 6px;
+    transition: background 0.15s;
+
+    &:hover {
+      background: rgba(59, 130, 246, 0.15);
+      color: #ffffff;
+    }
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
 </style>

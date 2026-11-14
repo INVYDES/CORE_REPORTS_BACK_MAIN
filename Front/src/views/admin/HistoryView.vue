@@ -4,6 +4,7 @@
   import { useAuthStore } from '../../stores/authStore'
   import { storeToRefs } from 'pinia'
   import client from '../../api/client'
+  import { unpackReportDesarrollo, stripUtcSuffix } from '../../utils/reportMeta'
   import { onMounted } from 'vue'
   import {
     ChevronLeft,
@@ -152,58 +153,165 @@
     dateStr: string // YYYY-MM-DD
   }
 
+  const findUserName = (idOrName: any) => {
+    if (!idOrName) return 'Sin asignar'
+    if (typeof idOrName === 'string' && isNaN(Number(idOrName))) return idOrName
+    const u = rawUsers.value.find(
+      (x: any) => Number(x.id ?? x.idUsuario) === Number(idOrName)
+    )
+    return u ? `${u.nombre} ${u.apellidos || ''}`.trim() : 'Sin asignar'
+  }
+
+  // Filtro de usuario para Admins (#11): por defecto "Mis actividades" para no revolver
+  // los reportes/tickets de los técnicos con los del administrador.
+  const workerFilter = ref<string>('mine')
+
+  const targetUserId = computed<number | null>(() => {
+    const uid = Number((currentUser.value as any)?.id ?? (currentUser.value as any)?.idUsuario)
+    if (currentUser.value?.rol === 3) return uid
+    if (workerFilter.value === 'mine') return uid
+    if (workerFilter.value === 'all') return null
+    const parsed = Number(workerFilter.value)
+    return isNaN(parsed) ? uid : parsed
+  })
+
+  const humanStatusLabel = (raw?: string | null) => {
+    const key = String(raw || '')
+      .trim()
+      .toLowerCase()
+    const map: Record<string, string> = {
+      abierto: 'Abierto',
+      en_proceso: 'En Proceso',
+      'en proceso': 'En Proceso',
+      resuelto: 'Resuelto',
+      cerrado: 'Cerrado',
+      programado: 'Programado',
+      realizado: 'Realizado',
+      vencido: 'Vencido',
+      parcial: 'Trabajo Parcial',
+      'abierto / trabajo parcial': 'Trabajo Parcial',
+      finalizado: 'Finalizado',
+      'cerrado / trabajo finalizado': 'Finalizado',
+      descartado: 'Descartado',
+    }
+    return map[key] || String(raw || 'En Proceso')
+  }
+
   // Filter and map all data globally for this user's enterprise
   const allTickets = computed<HistoryItem[]>(() => {
+    const filterUid = targetUserId.value
     return rawTickets.value
-      .filter((t: any) => (t.dependencia_id ?? t.idDependencia) === idDep)
-      .map(t => ({
-        id: t.id,
-        folio: t.folio,
-        worker: t.atendio || t.solicitante || t.usuario_asignado_id || '',
-        description: t.asunto,
-        status: t.estatus,
-        type: 'Ticket',
-        route: 'ticket-detail',
-        dateStr: (t.fecha_solicitud || t.fechaSolicitud) as string,
-      }))
+      .filter((t: any) => {
+        const dep = t.dependencia_id ?? t.idDependencia
+        if (dep !== undefined && idDep !== undefined && dep !== idDep) return false
+        if (filterUid !== null) {
+          return Number(t.usuario_asignado_id) === filterUid
+        }
+        return true
+      })
+      .map(t => {
+        const tid = Number(t.id ?? t.idTicket)
+        const hasFinalizadoReport = rawReportes.value.some(
+          (r: any) =>
+            Number(r.ticket_id) === tid &&
+            String(r.estatus || '').toLowerCase() === 'finalizado'
+        )
+        const effectiveStatus = hasFinalizadoReport
+          ? 'Resuelto'
+          : humanStatusLabel(t.estatus)
+        return {
+          id: tid,
+          folio: t.folio,
+          worker:
+            t.atendio ||
+            (t.usuario_asignado_id ? findUserName(t.usuario_asignado_id) : t.solicitante || ''),
+          description: t.asunto || t.descripcion || 'Sin asunto',
+          status: effectiveStatus,
+          type: 'Ticket' as const,
+          route: 'ticket-detail',
+          dateStr: stripUtcSuffix(
+            String(t.fecha_solicitud || t.fechaSolicitud || t.created_at || '')
+          ).slice(0, 10),
+        }
+      })
+      .filter(t => t.dateStr)
   })
 
   const allServices = computed<HistoryItem[]>(() => {
+    const filterUid = targetUserId.value
     return rawServices.value
-      .filter((s: any) => (s.dependencia_id ?? s.idDependencia) === idDep)
-      .map(s => ({
-        id: s.id,
-        folio: s.folio,
-        worker: s.asignadoA || s.usuario_asignado_id || 'Sin asignar',
-        description: s.asunto,
-        status: s.estatus,
-        type: 'Servicio',
-        route: 'service-detail',
-        dateStr: (s.fecha_vencimiento || s.fechaVencimiento) as string,
-      }))
+      .filter((s: any) => {
+        const dep = s.dependencia_id ?? s.idDependencia
+        if (dep !== undefined && idDep !== undefined && dep !== idDep) return false
+        if (filterUid !== null) {
+          return Number(s.usuario_asignado_id) === filterUid
+        }
+        return true
+      })
+      .map(s => {
+        const sid = Number(s.id ?? s.idServicio)
+        const hasFinalizadoReport = rawReportes.value.some(
+          (r: any) =>
+            Number(r.servicio_id) === sid &&
+            String(r.estatus || '').toLowerCase() === 'finalizado'
+        )
+        const effectiveStatus = hasFinalizadoReport
+          ? 'Realizado'
+          : humanStatusLabel(s.estatus)
+        return {
+          id: sid,
+          folio: s.folio,
+          worker: s.asignadoA || findUserName(s.usuario_asignado_id),
+          description: s.asunto || s.descripcion || 'Servicio programado',
+          status: effectiveStatus,
+          type: 'Servicio' as const,
+          route: 'service-detail',
+          dateStr: stripUtcSuffix(
+            String(
+              s.fecha_vencimiento || s.fechaVencimiento || s.fecha_asignacion || s.created_at || ''
+            )
+          ).slice(0, 10),
+        }
+      })
+      .filter(s => s.dateStr)
   })
 
   const allReports = computed<HistoryItem[]>(() => {
+    const filterUid = targetUserId.value
     return rawReportes.value
-      .filter((r: any) => (r.dependencia_id ?? r.idDependencia) === idDep)
+      .filter((r: any) => {
+        const dep = r.dependencia_id ?? r.idDependencia
+        if (dep !== undefined && idDep !== undefined && dep !== idDep) return false
+        if (filterUid !== null) {
+          return Number(r.creado_por ?? r.creadoPor) === filterUid
+        }
+        return true
+      })
       .map(r => {
         const creator = rawUsers.value.find(
-          (u: any) => (u.id ?? u.idUsuario) === (r.creado_por ?? r.creadoPor)
+          (u: any) => Number(u.id ?? u.idUsuario) === Number(r.creado_por ?? r.creadoPor)
         )
         const workerName = creator
-          ? `${creator.nombre} ${creator.apellidos}`
+          ? `${creator.nombre} ${creator.apellidos || ''}`.trim()
           : 'Usuario Desconocido'
+        const rawDate = stripUtcSuffix(
+          String(r.fecha_inicio || r.fechaElaboracion || r.created_at || '')
+        )
+        const unpacked = unpackReportDesarrollo(
+          r.desarrollo || r.desarrolloActividades || r.fallaReportada || ''
+        )
         return {
-          id: r.idReporte,
+          id: r.id ?? r.idReporte,
           folio: r.folio,
           worker: workerName,
-          description: String(r.fallaReportada || r.desarrolloActividades || 'Sin descripción'),
-          status: r.estatusReporte,
-          type: 'Reporte',
+          description: String(unpacked.text || r.fallaReportada || 'Sin descripción'),
+          status: humanStatusLabel(r.estatus || r.estatusReporte || 'parcial'),
+          type: 'Reporte' as const,
           route: 'report-detail',
-          dateStr: r.fechaElaboracion.split('T')[0] as string,
+          dateStr: rawDate.replace(' ', 'T').slice(0, 10),
         }
       })
+      .filter(r => r.dateStr)
   })
 
   const allItems = computed(() => [...allTickets.value, ...allServices.value, ...allReports.value])
@@ -267,10 +375,11 @@
   }
 
   const getStatusClass = (status: string) => {
-    if (status === 'Abierto' || status === 'Programado' || status.includes('Parcial'))
-      return 'bg-blue-100 text-blue-700'
-    if (status === 'En Proceso' || status === 'En Progreso') return 'bg-purple-100 text-purple-700'
-    if (status === 'Vencido') return 'bg-red-100 text-red-700'
+    const s = String(status || '').toLowerCase()
+    if (s.includes('abierto') || s.includes('programado')) return 'bg-blue-100 text-blue-700'
+    if (s.includes('proceso') || s.includes('progreso') || s.includes('parcial'))
+      return 'bg-purple-100 text-purple-700'
+    if (s.includes('vencido') || s.includes('descartado')) return 'bg-red-100 text-red-700'
     return 'bg-emerald-100 text-emerald-700'
   }
 
@@ -286,7 +395,25 @@
         <h2>Historial de Actividades</h2>
         <p class="text-slate-500 mt-1">Navega por el calendario para ver los registros del día</p>
       </div>
-      <button class="btn-today" @click="goToToday">Hoy</button>
+      <div class="flex items-center gap-3">
+        <select
+          v-if="currentUser?.rol !== 3"
+          v-model="workerFilter"
+          class="btn-today"
+          style="padding-right: 1.5rem; font-weight: 600"
+        >
+          <option value="mine">Mis actividades (Solo lo mío)</option>
+          <option value="all">Toda la empresa (Todos)</option>
+          <option
+            v-for="u in rawUsers"
+            :key="u.id ?? u.idUsuario"
+            :value="String(u.id ?? u.idUsuario)"
+          >
+            {{ u.nombre }} {{ u.apellidos || '' }}
+          </option>
+        </select>
+        <button class="btn-today" @click="goToToday">Hoy</button>
+      </div>
     </div>
 
     <div class="grid-history">

@@ -11,9 +11,14 @@
   const { currentUser } = storeToRefs(authStore)
 
   import client from '../../../api/client'
-  import { reportesApi } from '../../../api/reportes'
   import { downloadBlob } from '../../../utils/download'
-  import { Star, FileDown, FileSpreadsheet } from 'lucide-vue-next'
+  import {
+    unpackReportDesarrollo,
+    formatLocalDateShort,
+    formatLocalDateOnly,
+    parseLocalDate,
+  } from '../../../utils/reportMeta'
+  import { Star, FileDown } from 'lucide-vue-next'
   import { useToast } from 'vue-toastification'
 
   const router = useRouter()
@@ -21,6 +26,7 @@
 
   const searchQuery = ref('')
   const filterTipo = ref('Todos') // 'Todos', 'Ticket', 'Servicio Programado'
+  const filterUsuario = ref('Todos') // 'Todos' or user ID
   const dateFilter = ref('')
 
   const reports = ref<any[]>([])
@@ -32,25 +38,54 @@
     if (isExporting.value) return
     isExporting.value = true
     try {
-      const params: Record<string, any> = { formato }
-      const tipo = (
-        { Ticket: 'ticket', 'Servicio Programado': 'servicio', Libre: 'libre' } as Record<
-          string,
-          string
-        >
-      )[filterTipo.value]
-      if (tipo) params.tipo = tipo
-      if (searchQuery.value.trim()) params.search = searchQuery.value.trim()
-      if (dateFilter.value) {
-        params.desde = dateFilter.value
-        params.hasta = dateFilter.value
-      }
-      const blob = await reportesApi.export(params)
       const fecha = new Date().toISOString().slice(0, 10)
-      downloadBlob(blob, `reportes-${fecha}.${formato}`)
-      toast.success('Exportación generada correctamente')
-    } catch (e: any) {
-      toast.error(e?.response?.data?.message || 'No se pudo generar la exportación')
+      const headers = ['Folio', 'Tipo', 'Origen', 'Elaboró', 'Fecha', 'Estatus', 'Actividades']
+      const rows = filteredReports.value.map((r: any) => {
+        const orig = getOrigenDetails(r)
+        return [
+          r.folio || '',
+          r.tipoReporte || '',
+          `${orig.folio} ${orig.asunto}`.trim(),
+          getUserName(r.creadoPor),
+          r.fechaElaboracion || '',
+          r.estatusReporte || '',
+          r.desarrolloActividades || '',
+        ]
+      })
+
+      if (formato === 'xlsx') {
+        const escHtml = (v: any) =>
+          String(v ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+        const ths = headers
+          .map(
+            h =>
+              `<th style="background:#1e3a8a;color:#ffffff;font-weight:bold;padding:8px;border:1px solid #cbd5e1;">${escHtml(h)}</th>`
+          )
+          .join('')
+        const trs = rows
+          .map(
+            row =>
+              `<tr>${row.map(cell => `<td style="padding:6px 8px;border:1px solid #cbd5e1;vertical-align:top;">${escHtml(cell)}</td>`).join('')}</tr>`
+          )
+          .join('')
+        const html = `\uFEFF<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="UTF-8"></head><body><table><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table></body></html>`
+        const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8;' })
+        downloadBlob(blob, `reportes-${fecha}.xls`)
+        toast.success('Archivo Excel descargado correctamente')
+      } else {
+        const escCsv = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`
+        const csvLines = rows.map(r => r.map(escCsv).join(','))
+        const csv =
+          '\uFEFF' + headers.map(escCsv).join(',') + '\r\n' + csvLines.join('\r\n') + '\r\n'
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+        downloadBlob(blob, `reportes-${fecha}.csv`)
+        toast.success('Archivo CSV descargado correctamente')
+      }
+    } catch {
+      toast.error('No se pudo generar la exportación')
     } finally {
       isExporting.value = false
     }
@@ -67,7 +102,7 @@
         descartado: 'Descartado / Cancelado',
       }) as any
     )[code] || code
-  const fmtShort = (iso?: string | null) => (iso ? String(iso).replace('T', ' ').slice(0, 16) : '')
+  const fmtShort = (iso?: string | null) => formatLocalDateShort(iso)
 
   const getUserName = (id: number | null | undefined) => {
     if (!id) return 'Sin Asignar'
@@ -78,19 +113,23 @@
   // Get the Title/Folio of the parent Ticket or Service (resuelto en el fetch con datos reales)
   const getOrigenDetails = (reporte: any) => {
     if (reporte.tipoReporte === 'Libre' || !reporte.origenDatosId) {
-      return { folio: 'N/A', asunto: ' Reporte Independiente / Libre ' }
+      return { folio: 'N/A', asunto: 'Reporte Independiente / Libre' }
     }
+    const rawFolio = String(reporte.originFolio || `#${reporte.origenDatosId}`)
+    const cleanFolio = rawFolio.replace(/^(Ticket|Servicio):\s*/i, '')
     if (reporte.tipoReporte === 'Ticket') {
-      return reporte.originFolio
-        ? { folio: `Ticket: ${reporte.originFolio}`, asunto: reporte.originAsunto }
-        : { folio: 'N/A', asunto: 'Ticket no encontrado' }
+      return {
+        folio: cleanFolio,
+        asunto: reporte.originAsunto || '',
+      }
     }
     if (reporte.tipoReporte === 'Servicio Programado') {
-      return reporte.originFolio
-        ? { folio: `Servicio: ${reporte.originFolio}`, asunto: reporte.originAsunto }
-        : { folio: 'N/A', asunto: 'Servicio no encontrado' }
+      return {
+        folio: cleanFolio,
+        asunto: reporte.originAsunto || '',
+      }
     }
-    return { folio: '---', asunto: 'Tipo de origen desconocido' }
+    return { folio: cleanFolio, asunto: 'Tipo de origen desconocido' }
   }
 
   // Check if the report has a customer survey
@@ -100,9 +139,7 @@
 
   // Form date for display
   const formatDate = (dateString: string) => {
-    if (!dateString) return '---'
-    const date = new Date(dateString)
-    return date.toLocaleDateString('es-MX', { year: 'numeric', month: '2-digit', day: '2-digit' })
+    return formatLocalDateOnly(dateString)
   }
 
   const loadReports = async () => {
@@ -120,9 +157,11 @@
           origenDatosId: x.ticket_id ?? x.servicio_id ?? null,
           originFolio: origen?.folio || '',
           originAsunto: origen?.asunto || '',
+          fechaRaw: String(x.fecha_inicio || x.created_at || '').slice(0, 10),
           fechaElaboracion: fmtShort(x.fecha_inicio),
-          desarrolloActividades: x.desarrollo || '',
+          desarrolloActividades: unpackReportDesarrollo(x.desarrollo || '').text,
           estatusReporte: estatusLabel(x.estatus),
+          ejecutoresIds: (x.ejecutores || []).map((e: any) => Number(e.usuario_id)),
         }
       })
     } catch {
@@ -156,16 +195,53 @@
     loadSurveys()
   })
 
+  // Lista de usuarios disponibles para filtrar (Admin Técnico / Administradores)
+  const availableUsers = computed(() => {
+    const map = new Map<number, string>()
+    users.value.forEach((u: any) => {
+      const id = Number(u.id ?? u.idUsuario)
+      if (id) {
+        const name = `${u.nombre || ''} ${u.apellidos || ''}`.trim()
+        map.set(id, name || `Usuario #${id}`)
+      }
+    })
+    reports.value.forEach((r: any) => {
+      const id = Number(r.creadoPor)
+      if (id && !map.has(id)) {
+        map.set(id, getUserName(id))
+      }
+    })
+    return Array.from(map.entries())
+      .map(([id, nombre]) => ({ id, nombre }))
+      .sort((a, b) => a.nombre.localeCompare(b.nombre))
+  })
+
   // Filter Engine
   const filteredReports = computed(() => {
     const depId =
       (currentUser.value as any)?.dependencia_id ?? (currentUser.value as any)?.idDependencia
+    const uid = (currentUser.value as any)?.id ?? (currentUser.value as any)?.idUsuario
     return (
       reports.value
         // Multi-tenant security: only show reports for this enterprise
         .filter(
           r => r.idDependencia === undefined || depId === undefined || r.idDependencia === depId
         )
+        // Role security (#23): technicians only see reports created by themselves
+        .filter(r => {
+          if (currentUser.value?.rol === 3 && uid !== undefined) {
+            return Number(r.creadoPor) === Number(uid)
+          }
+          return true
+        })
+        // Filter by user (Admin Técnico / Admins)
+        .filter(r => {
+          if (filterUsuario.value === 'Todos' || !filterUsuario.value) return true
+          const targetId = Number(filterUsuario.value)
+          const creadorMatch = Number(r.creadoPor) === targetId
+          const ejecutorMatch = Array.isArray(r.ejecutoresIds) && r.ejecutoresIds.includes(targetId)
+          return creadorMatch || ejecutorMatch
+        })
         // Filter by type dropdown
         .filter(r => filterTipo.value === 'Todos' || r.tipoReporte === filterTipo.value)
         // Search bar (Search by Report Folio or origin folio)
@@ -180,12 +256,20 @@
         // Filter by Date
         .filter(r => {
           if (!dateFilter.value) return true
-          return (r.fechaElaboracion || '').startsWith(dateFilter.value)
+          const dStr = String(dateFilter.value).slice(0, 10)
+          const [y, m, d] = dStr.includes('-') ? dStr.split('-') : ['', '', '']
+          const dLatam = y && m && d ? `${d}/${m}/${y}` : ''
+          return (
+            (r.fechaRaw && r.fechaRaw.startsWith(dStr)) ||
+            (r.fechaElaboracion && r.fechaElaboracion.startsWith(dStr)) ||
+            (Boolean(dLatam) && Boolean(r.fechaElaboracion) && r.fechaElaboracion.startsWith(dLatam))
+          )
         })
-        .sort(
-          (a: any, b: any) =>
-            new Date(b.fechaElaboracion).getTime() - new Date(a.fechaElaboracion).getTime()
-        )
+        .sort((a: any, b: any) => {
+          const da = parseLocalDate(a.fechaElaboracion)?.getTime() || 0
+          const db = parseLocalDate(b.fechaElaboracion)?.getTime() || 0
+          return db - da
+        })
     )
   })
 </script>
@@ -201,14 +285,6 @@
         <button class="btn-export" :disabled="isExporting" @click="exportReports('csv')">
           <FileDown :size="16" />
           <span>Exportar CSV</span>
-        </button>
-        <button
-          class="btn-export btn-export-primary"
-          :disabled="isExporting"
-          @click="exportReports('xlsx')"
-        >
-          <FileSpreadsheet :size="16" />
-          <span>Exportar Excel</span>
         </button>
       </div>
     </div>
@@ -230,6 +306,19 @@
 
       <!-- Date Filter -->
       <DateFilter v-model="dateFilter" style="max-width: 200px" />
+
+      <!-- User Filter (Admin Técnico / Administradores) -->
+      <select
+        v-if="currentUser?.rol !== 3"
+        v-model="filterUsuario"
+        class="filter-dropdown filter-user-dropdown"
+        title="Filtrar por técnico o elaborador"
+      >
+        <option value="Todos">Todos los Usuarios</option>
+        <option v-for="u in availableUsers" :key="u.id" :value="String(u.id)">
+          {{ u.nombre }}
+        </option>
+      </select>
 
       <!-- Dropdown List Filter Type-->
       <select v-model="filterTipo" class="filter-dropdown">
@@ -290,9 +379,9 @@
             }}</span>
           </div>
 
-          <!-- Activities decription -->
-          <p class="text-sm text-slate-500 mt-1 block line-clamp-2 m-0">
-            {{ report.desarrolloActividades || 'Sin descripción de actividades.' }}
+          <!-- Activities decription - truncado limpio a máximo 2 renglones -->
+          <p class="report-desarrollo-clamp text-sm text-slate-500 mt-1 m-0">
+            {{ (report.desarrolloActividades || 'Sin descripción de actividades.').slice(0, 160) }}
           </p>
         </div>
 
@@ -320,6 +409,7 @@
           </span>
           <!-- Survey Indicator -->
           <Star
+            v-if="currentUser?.rol !== 3"
             :size="18"
             class="flex-shrink-0"
             :class="hasSurvey(report.idReporte) ? 'text-amber-400' : 'text-slate-300'"
@@ -441,6 +531,10 @@
     cursor: pointer;
     color: #475569;
   }
+  .filter-user-dropdown {
+    min-width: 170px;
+    max-width: 240px;
+  }
 
   /* Main Card Container */
   .list-card {
@@ -534,6 +628,18 @@
     padding: 3rem;
     text-align: center;
     color: #64748b;
+  }
+
+  .report-desarrollo-clamp {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-height: 2.85em;
+    line-height: 1.4;
+    word-break: break-word;
   }
 
   @media (max-width: 768px) {

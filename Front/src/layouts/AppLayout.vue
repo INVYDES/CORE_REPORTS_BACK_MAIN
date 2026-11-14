@@ -32,6 +32,11 @@
   const closeSidebar = () => {
     isSidebarOpen.value = false
   }
+
+  const onSidebarTicketCreated = () => {
+    showTicketModal.value = false
+    window.dispatchEvent(new CustomEvent('core-reports:ticket-created'))
+  }
 </script>
 
 <template>
@@ -63,12 +68,8 @@
         <div
           v-if="showReportModal"
           class="report-modal-overlay"
-          @click.self="showReportModal = false"
         >
           <div class="report-modal-content">
-            <button class="report-modal-close" @click="showReportModal = false" title="Cerrar">
-              ×
-            </button>
             <div class="report-modal-body">
               <ReportCreateView
                 :isModal="true"
@@ -84,17 +85,13 @@
         <div
           v-if="showTicketModal"
           class="report-modal-overlay"
-          @click.self="showTicketModal = false"
         >
           <div class="report-modal-content" style="max-width: 800px">
-            <button class="report-modal-close" @click="showTicketModal = false" title="Cerrar">
-              ×
-            </button>
             <div class="report-modal-body">
               <TicketCreateView
                 :isModal="true"
                 @close="showTicketModal = false"
-                @created="showTicketModal = false"
+                @created="onSidebarTicketCreated"
               />
             </div>
           </div>

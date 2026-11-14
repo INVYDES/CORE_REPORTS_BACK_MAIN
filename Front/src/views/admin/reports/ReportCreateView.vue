@@ -1,6 +1,7 @@
 <script setup lang="ts">
-  import { reactive, computed, ref, onMounted } from 'vue'
-  import { useRouter } from 'vue-router'
+  import { reactive, computed, ref, onMounted, watch } from 'vue'
+  import { useRoute, useRouter } from 'vue-router'
+  const route = useRoute()
   const router = useRouter()
 
   import { useAuthStore } from '../../../stores/authStore'
@@ -14,12 +15,19 @@
   import { serviciosApi } from '../../../api/servicios'
   import { areasApi } from '../../../api/areas'
   import client from '../../../api/client'
+  import { calcNetHoursText } from '../../../utils/reportMeta'
   import { useToast } from 'vue-toastification'
-  import { Image as ImageIcon, Upload, Camera, FileText } from 'lucide-vue-next'
+  import { Image as ImageIcon, Upload, Camera, FileText, Mail, Plus, X, Send } from 'lucide-vue-next'
   const toast = useToast()
 
   const props = defineProps<{ isModal?: boolean }>()
   const emit = defineEmits<{ (e: 'close'): void; (e: 'created'): void }>()
+
+  const nowLocalIso = () => {
+    const d = new Date()
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  }
 
   const formData = reactive({
     tipoReporte: 'Ticket',
@@ -32,8 +40,9 @@
       | 'Diagnóstico',
     fallaReportada: '',
     conclusionTrabajo: '',
-    fechaElaboracion: new Date().toISOString().slice(0, 16),
+    fechaElaboracion: nowLocalIso(),
     idSubdependencia: null as number | null,
+    areaTexto: '',
     responsableTexto: '',
     cargoTexto: '',
     ejecutoresIds: [] as number[],
@@ -47,7 +56,39 @@
     evidenciaFotografica: [] as EvidenciaFotografica[],
     esRetrabajo: false,
     estatusReporte: 'Abierto / Trabajo Parcial',
+    enviarCorreo: false,
+    destinatariosCorreo: [] as string[],
+    comentarioCorreo: '',
   })
+
+  // Control para mostrar u ocultar la funcionalidad de envío por correo
+  const ENABLE_EMAIL_FEATURE = false
+
+  const nuevoCorreoInput = ref('')
+  const agregarCorreo = () => {
+    const raw = nuevoCorreoInput.value.trim()
+    if (!raw) return
+    const emails = raw.split(/[\s,;]+/).filter(Boolean)
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    let agregados = 0
+    for (const e of emails) {
+      if (!emailRegex.test(e)) {
+        toast.warning(`"${e}" no parece ser un correo válido`)
+        continue
+      }
+      if (!formData.destinatariosCorreo.includes(e)) {
+        formData.destinatariosCorreo.push(e)
+        agregados++
+      }
+    }
+    if (agregados > 0) {
+      nuevoCorreoInput.value = ''
+    }
+  }
+
+  const removerCorreo = (index: number) => {
+    formData.destinatariosCorreo.splice(index, 1)
+  }
 
   const dependencyName = computed(
     () => (currentUser.value as any)?.dependencia?.nombre || 'Empresa'
@@ -55,7 +96,111 @@
 
   const realAreas = ref<any[]>([])
   const availableSubareas = computed(() => realAreas.value)
+
+  const esAreaManual = ref(false)
+  const toggleAreaModo = () => {
+    esAreaManual.value = !esAreaManual.value
+    if (!esAreaManual.value) {
+      formData.areaTexto = ''
+    } else {
+      formData.idSubdependencia = null
+    }
+  }
+
+  const CATEGORIA_MAP: Record<string, typeof formData.categoria> = {
+    preventivo: 'Mantenimiento Preventivo',
+    correctivo: 'Mantenimiento Correctivo',
+    instalacion: 'Instalación',
+    mejora: 'Mejora',
+    diagnostico: 'Diagnóstico',
+  }
+
+  const applyOriginPrefill = (tipo: string, origenId: number | null) => {
+    if (!origenId) return
+    const item =
+      tipo === 'Ticket'
+        ? availableTicketsReal.value.find((t: any) => Number(t.id) === Number(origenId))
+        : tipo === 'Servicio Programado'
+          ? availableServicesReal.value.find((s: any) => Number(s.id) === Number(origenId))
+          : null
+    if (!item) return
+
+    // 1. Área o ubicación externa
+    if (item.area_id) {
+      formData.idSubdependencia = Number(item.area_id)
+      esAreaManual.value = false
+      formData.areaTexto = ''
+    } else {
+      const desc = String(item.descripcion || '')
+      const matchLugarDesc = desc.match(/🏢 Lugar \/ Sucursal:\s*([^\n\r]+)/i)
+      const matchLugarCargo = String(item.cargo || '').match(/Lugar:\s*([^|]+)/i)
+      const lugarDetectado = (matchLugarDesc?.[1] || matchLugarCargo?.[1] || '').trim()
+      if (lugarDetectado) {
+        esAreaManual.value = true
+        formData.areaTexto = lugarDetectado
+        formData.idSubdependencia = null
+      }
+    }
+
+    // 2. Solicitante / Responsable
+    if (item.solicitante && !formData.responsableTexto.trim()) {
+      formData.responsableTexto = String(item.solicitante)
+    }
+
+    // 3. Cargo / Puesto (limpiar si venía en formato Lugar / Tel)
+    if (item.cargo && !formData.cargoTexto.trim()) {
+      const cStr = String(item.cargo).trim()
+      if (cStr.startsWith('Lugar:') || cStr.includes('Tel:')) {
+        formData.cargoTexto = 'Cliente / Solicitante'
+      } else {
+        formData.cargoTexto = cStr
+      }
+    }
+
+    // 4. Descripción de la Falla limpia (sin teléfonos, emojis ni fotos)
+    if (!formData.fallaReportada.trim()) {
+      if (tipo === 'Ticket') {
+        const desc = String(item.descripcion || '')
+        const matchFalla = desc.match(/[📋]?\s*Descripción de la Falla:\s*([\s\S]*?)(?=\n\n[📷]?\s*Evidencias|\n\n--|$)/i)
+        if (matchFalla && matchFalla[1].trim()) {
+          formData.fallaReportada = matchFalla[1].trim()
+        } else if (item.asunto) {
+          formData.fallaReportada = String(item.asunto).replace(/^\[[^\]]+\]\s*/, '')
+        }
+      } else if (tipo === 'Servicio Programado') {
+        formData.fallaReportada = String(item.asunto || item.descripcion || '')
+      }
+    }
+    if (tipo === 'Servicio Programado' && item.categoria) {
+      const mappedCat = CATEGORIA_MAP[item.categoria]
+      if (mappedCat) {
+        formData.categoria = mappedCat
+      }
+    }
+    const uid = (currentUser.value as any)?.id ?? (currentUser.value as any)?.idUsuario
+    const execId = Number(item.usuario_asignado_id || uid || 0)
+    if (formData.ejecutoresIds.length === 0 && execId > 0) {
+      formData.ejecutoresIds = [execId]
+    }
+  }
+
+  watch(
+    () => [formData.tipoReporte, formData.origenDatosId] as const,
+    ([tipo, origenId]) => {
+      applyOriginPrefill(tipo, origenId)
+    }
+  )
+
   onMounted(async () => {
+    const qTipo = String(route.query.tipo || '').trim()
+    const qOrigenId = Number(route.query.origenId || 0)
+    if (qTipo === 'Ticket' || qTipo === 'Servicio Programado' || qTipo === 'Libre') {
+      formData.tipoReporte = qTipo
+    }
+    if (qOrigenId > 0) {
+      formData.origenDatosId = qOrigenId
+    }
+
     try {
       const res = await areasApi.list()
       const list = res.data || res
@@ -91,6 +236,29 @@
     } catch {
       /* no-op */
     }
+
+    applyOriginPrefill(formData.tipoReporte, formData.origenDatosId)
+
+    // Pre-cargar correo para recepción de reportes de la empresa si existe
+    try {
+      const depCorreo =
+        (currentUser.value as any)?.dependencia?.correo_reportes ||
+        (currentUser.value as any)?.dependencia?.correo_contacto ||
+        ''
+      if (depCorreo && formData.destinatariosCorreo.length === 0) {
+        formData.destinatariosCorreo.push(depCorreo)
+      } else if (formData.destinatariosCorreo.length === 0) {
+        client.get('/empresa').then((res: any) => {
+          const emp = res.data?.data || res.data || {}
+          const cMail = emp.correoReportes || emp.correo_reportes || emp.correoContacto || emp.correo_contacto
+          if (cMail && formData.destinatariosCorreo.length === 0) {
+            formData.destinatariosCorreo.push(cMail)
+          }
+        }).catch(() => {})
+      }
+    } catch {
+      /* no-op */
+    }
   })
 
   const availableTicketsReal = ref<any[]>([])
@@ -99,10 +267,10 @@
 
   const getAsuntoFallback = (tipo: string, id: number) => {
     if (tipo === 'Ticket') {
-      const r = availableTicketsReal.value.find((t: any) => t.id === id)
+      const r = availableTicketsReal.value.find((t: any) => Number(t.id) === Number(id))
       return r ? r.asunto : 'Ticket no encontrado'
     } else {
-      const r = availableServicesReal.value.find((s: any) => s.id === id)
+      const r = availableServicesReal.value.find((s: any) => Number(s.id) === Number(id))
       return r ? r.asunto : 'Servicio no encontrado'
     }
   }
@@ -136,16 +304,7 @@
   }
 
   const totalHorasCalculadas = computed(() => {
-    if (!formData.fechaHoraInicio || !formData.fechaHoraFin) return '0.0 hrs'
-
-    const start = new Date(formData.fechaHoraInicio).getTime()
-    const end = new Date(formData.fechaHoraFin).getTime()
-
-    const diffMs = end - start
-    if (diffMs < 0) return '0.0 hrs' // Prevent negative time
-
-    const hours = diffMs / (1000 * 60 * 60)
-    return `${hours.toFixed(2)} hrs`
+    return calcNetHoursText(formData.fechaHoraInicio, formData.fechaHoraFin)
   })
 
   const addEjecutor = () => {
@@ -180,23 +339,41 @@
   }
 
   const availableTickets = computed(() => {
+    const uid = (currentUser.value as any)?.id ?? (currentUser.value as any)?.idUsuario
     if (availableTicketsReal.value.length)
-      return availableTicketsReal.value.map((t: any) => ({
-        id: t.id,
-        folio: t.folio,
-        asunto: t.asunto,
-        idDependencia: t.dependencia_id,
-      }))
+      return availableTicketsReal.value
+        .filter((t: any) => {
+          if (Number(t.id) === Number(formData.origenDatosId)) return true
+          // Exclude already resolved or closed tickets from creation list
+          const st = String(t.estatus || '').toLowerCase()
+          if (['resuelto', 'cerrado'].includes(st)) return false
+          return currentUser.value?.rol === 3 ? Number(t.usuario_asignado_id) === Number(uid) : true
+        })
+        .map((t: any) => ({
+          id: Number(t.id),
+          folio: t.folio,
+          asunto: t.asunto,
+          idDependencia: t.dependencia_id,
+        }))
     return []
   })
   const availableServices = computed(() => {
+    const uid = (currentUser.value as any)?.id ?? (currentUser.value as any)?.idUsuario
     if (availableServicesReal.value.length)
-      return availableServicesReal.value.map((s: any) => ({
-        id: s.id,
-        folio: s.folio,
-        asunto: s.asunto,
-        idDependencia: s.dependencia_id,
-      }))
+      return availableServicesReal.value
+        .filter((s: any) => {
+          if (Number(s.id) === Number(formData.origenDatosId)) return true
+          // Exclude already realized or finalized services from creation list
+          const st = String(s.estatus || '').toLowerCase()
+          if (['realizado', 'finalizado', 'completado'].includes(st)) return false
+          return currentUser.value?.rol === 3 ? Number(s.usuario_asignado_id) === Number(uid) : true
+        })
+        .map((s: any) => ({
+          id: Number(s.id),
+          folio: s.folio,
+          asunto: s.asunto,
+          idDependencia: s.dependencia_id,
+        }))
     return []
   })
 
@@ -215,26 +392,31 @@
         return
       }
       const fd = await buildReporteFormData(mapped, client)
-      if (formData.conclusionTrabajo)
-        fd.append(
-          'desarrollo',
-          (formData.desarrolloActividades || '') + '\nConclusión: ' + formData.conclusionTrabajo
-        )
       const res = await client.post('/reportes', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
-      toast.success(
-        `¡Éxito! El reporte ${res.data.folio} ha sido guardado. El back ya sincronizó Ticket/Servicio automáticamente.`
-      )
+      if (res.data?.correo_enviado) {
+        toast.success(
+          `¡Éxito! Reporte ${res.data.folio} guardado y enviado por correo con su PDF adjunto.`
+        )
+      } else if (res.data?.correo_error) {
+        toast.warning(
+          `Reporte ${res.data.folio} guardado, pero no se pudo enviar el correo: ${res.data.correo_error}`
+        )
+      } else {
+        toast.success(
+          `¡Éxito! El reporte ${res.data.folio} ha sido guardado correctamente.`
+        )
+      }
       if (props.isModal) {
         emit('created')
         emit('close')
       } else router.push({ name: 'dashboard' })
     } catch (e: any) {
       const msg =
-        e?.message ||
         e?.response?.data?.message ||
-        JSON.stringify(e?.response?.data?.errors) ||
+        (e?.response?.data?.errors ? Object.values(e.response.data.errors).flat().join(', ') : null) ||
+        e?.message ||
         'Error al guardar reporte'
       toast.error(msg)
     } finally {
@@ -262,7 +444,14 @@
   const autoResize = (event: Event) => {
     const target = event.target as HTMLTextAreaElement
     target.style.height = 'auto'
-    target.style.height = `${target.scrollHeight}px`
+    const max = 280
+    if (target.scrollHeight > max) {
+      target.style.height = `${max}px`
+      target.style.overflowY = 'auto'
+    } else {
+      target.style.height = `${Math.max(target.scrollHeight, 100)}px`
+      target.style.overflowY = 'hidden'
+    }
   }
 
   const MAX_EVIDENCIAS = 20
@@ -319,6 +508,12 @@
   }
 
   const previewUrl = ref<string | null>(null)
+
+  const handleCancel = () => {
+    if (props.isModal) emit('close')
+    else if (window.history.length > 1) router.back()
+    else router.push({ name: 'reports' })
+  }
 </script>
 
 <template>
@@ -326,7 +521,13 @@
     <!-- Header -->
     <div class="header-actions">
       <h2>Crear Nuevo Reporte Técnico</h2>
-      <button v-if="isModal" @click="emit('close')" class="btn-close-modal" title="Cerrar">
+      <button
+        v-if="isModal"
+        type="button"
+        @click="emit('close')"
+        title="Cerrar"
+        style="width: 36px; height: 36px; border-radius: 50%; background: #f1f5f9; border: 1px solid #e2e8f0; font-size: 20px; color: #64748b; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0;"
+      >
         ×
       </button>
     </div>
@@ -447,10 +648,26 @@
             <input type="text" :value="dependencyName" disabled class="input-disabled" />
           </div>
 
-          <!-- Subarea dropdown -->
+          <!-- Subarea dropdown o ubicación externa manual -->
           <div class="form-group">
-            <label>Dependencia / Área</label>
-            <select v-model="formData.idSubdependencia">
+            <div class="flex items-center justify-between mb-1">
+              <label class="mb-0">Dependencia / Área</label>
+              <button
+                type="button"
+                class="text-xs text-blue-600 hover:text-blue-800 underline font-medium focus:outline-none cursor-pointer"
+                @click="toggleAreaModo"
+              >
+                {{ esAreaManual ? '← Seleccionar de lista' : '+ Otra / Ubicación externa' }}
+              </button>
+            </div>
+            <input
+              v-if="esAreaManual"
+              type="text"
+              v-model="formData.areaTexto"
+              placeholder="Ej. Tienda de conveniencia / Sucursal Aeropuerto"
+              class="w-full"
+            />
+            <select v-else v-model="formData.idSubdependencia">
               <option :value="null">Selecciona un área...</option>
               <option
                 v-for="area in availableSubareas"
@@ -460,6 +677,9 @@
                 {{ area.nombre }}
               </option>
             </select>
+            <span class="format-hint">
+              {{ esAreaManual ? 'Ubicación o sucursal externa (manual)' : 'Área o dependencia registrada en sistema' }}
+            </span>
           </div>
 
           <!-- Responsable-->
@@ -616,22 +836,18 @@
           </div>
         </div>
 
-        <!-- F/S/Activitie label - Autofilled based on data origin or user input -->
+        <!-- F/S/Activitie label - Editable para todos los tipos de reporte -->
         <div class="form-group mt-1-5">
           <label>Descripción de la falla reportada</label>
-          <input
-            v-if="formData.tipoReporte !== 'Libre'"
-            type="text"
-            :value="asuntoOrigen"
-            disabled
-            class="input-disabled"
-          />
-          <input
-            v-else
-            type="text"
+          <textarea
             v-model="formData.fallaReportada"
-            placeholder="Escribe la descripción de la falla..."
-          />
+            rows="2"
+            class="w-full resize-y"
+            placeholder="Describe la falla reportada o requerimiento detectado..."
+          ></textarea>
+          <span class="format-hint">
+            Problema o requerimiento inicial (aparece en el encabezado del reporte y PDF)
+          </span>
         </div>
       </div>
 
@@ -645,12 +861,13 @@
           <!-- Label -->
           <label> Descripción de actividades </label>
 
-          <!-- Text area -->
+          <!-- Text area con scroll interno y tope de altura -->
           <textarea
             v-model="formData.desarrolloActividades"
-            rows="4"
+            rows="5"
             @input="autoResize"
-            class="overflow-hidden"
+            class="w-full resize-y overflow-y-auto"
+            style="max-height: 280px; min-height: 110px;"
             placeholder="Describe las actividades realizadas con detalle..."
           >
           </textarea>
@@ -859,8 +1076,87 @@
         </div>
       </div>
 
+      <!-- SECCIÓN 6: Envío del Reporte por Correo Electrónico (Oculto temporalmente) -->
+      <div v-if="ENABLE_EMAIL_FEATURE" class="form-section">
+        <div class="flex items-center justify-between flex-wrap gap-2 mb-4">
+          <div class="flex items-center gap-2">
+            <Mail class="text-blue-600" :size="20" />
+            <h2 class="section-title m-0 p-0 text-base md:text-lg font-bold text-slate-800">
+              6. Envío del Reporte por Correo Electrónico
+            </h2>
+          </div>
+          <label class="flex items-center gap-2 cursor-pointer text-sm font-medium text-slate-700 select-none">
+            <input type="checkbox" v-model="formData.enviarCorreo" class="rounded text-blue-600 w-4 h-4 cursor-pointer" />
+            <span>Enviar PDF adjunto al guardar reporte</span>
+          </label>
+        </div>
+
+        <div v-if="formData.enviarCorreo" class="bg-white border border-slate-200 rounded-lg p-4">
+          <p class="text-xs text-slate-500 mb-3">
+            El sistema generará el archivo oficial en PDF con las evidencias y lo enviará automáticamente a las siguientes direcciones de correo:
+          </p>
+
+          <!-- Tags de correos agregados -->
+          <div class="flex flex-wrap gap-2 mb-3" v-if="formData.destinatariosCorreo.length > 0">
+            <span
+              v-for="(email, idx) in formData.destinatariosCorreo"
+              :key="idx"
+              class="inline-flex items-center gap-1.5 bg-blue-50 text-blue-700 border border-blue-200 px-3 py-1 rounded-full text-xs font-semibold"
+            >
+              <Mail :size="13" class="text-blue-500" />
+              {{ email }}
+              <button
+                type="button"
+                @click="removerCorreo(idx)"
+                class="text-blue-400 hover:text-red-600 rounded-full p-0.5 transition-colors cursor-pointer"
+                title="Eliminar correo"
+              >
+                <X :size="13" />
+              </button>
+            </span>
+          </div>
+          <p v-else class="text-xs text-amber-600 font-medium mb-3">
+            ⚠️ No hay correos agregados. Añade al menos uno abajo para que se realice el envío.
+          </p>
+
+          <!-- Form para añadir correos -->
+          <div class="flex flex-col sm:flex-row gap-2">
+            <div class="flex-1">
+              <input
+                type="email"
+                v-model="nuevoCorreoInput"
+                @keydown.enter.prevent="agregarCorreo"
+                placeholder="ejemplo@correo.com (o varios separados por coma)"
+                class="w-full text-sm rounded border border-slate-300 px-3 py-2 bg-slate-50 focus:bg-white focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <button
+              type="button"
+              @click="agregarCorreo"
+              class="btn-outline flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-semibold cursor-pointer"
+            >
+              <Plus :size="15" />
+              Añadir Correo
+            </button>
+          </div>
+
+          <!-- Mensaje / Comentario opcional para el correo -->
+          <div class="mt-3">
+            <label class="block text-xs font-medium text-slate-600 mb-1">
+              Nota o mensaje adicional en el correo (opcional):
+            </label>
+            <input
+              type="text"
+              v-model="formData.comentarioCorreo"
+              placeholder="Ej: Estimado cliente, adjuntamos el reporte técnico correspondiente al servicio realizado..."
+              class="w-full text-xs rounded border border-slate-300 px-3 py-1.5 bg-slate-50 focus:bg-white focus:outline-none focus:border-blue-500"
+            />
+          </div>
+        </div>
+      </div>
+
       <div class="form-actions">
-        <button v-if="isModal" type="button" @click="emit('close')" class="btn-cancelar">
+        <button type="button" @click="handleCancel" class="btn-cancelar">
           Cancelar
         </button>
         <button class="btn-primary" @click="saveReport" :disabled="isSaving">
@@ -870,7 +1166,7 @@
     </form>
 
     <!-- Image Preview Modal -->
-    <div class="modal-overlay" v-if="previewUrl" @click="previewUrl = null">
+    <div class="modal-overlay" v-if="previewUrl">
       <div class="modal-content-img" @click.stop>
         <button class="btn-close-modal" @click="previewUrl = null">&times;</button>
         <img :src="previewUrl" class="img-preview-full" alt="Vista previa detallada" />
@@ -894,44 +1190,77 @@
 
   .header-actions {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
     gap: 1rem;
-    align-items: stretch;
     margin-bottom: 2rem;
-  }
-  @media (min-width: 768px) {
-    .header-actions {
-      flex-direction: row;
-      justify-content: space-between;
-      align-items: center;
-    }
   }
 
   .form-actions {
     display: flex;
-    justify-content: flex-end;
+    flex-direction: column-reverse;
+    gap: 0.75rem;
     margin-top: 2rem;
+  }
+  @media (min-width: 768px) {
+    .form-actions {
+      flex-direction: row;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 1rem;
+    }
+  }
+
+  .btn-cancelar {
+    background: #ffffff;
+    color: #475569;
+    padding: 0.75rem 1.25rem;
+    border-radius: 8px;
+    border: 1px solid #cbd5e1;
+    cursor: pointer;
+    width: 100%;
+    transition: all 0.2s ease;
+    font-size: 0.95rem;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .btn-cancelar:hover {
+    background: #f1f5f9;
+    color: #0f172a;
+    border-color: #94a3b8;
   }
 
   .btn-primary {
     background: #3b82f6;
     color: white;
-    padding: 0.75rem 1rem;
-    border-radius: 6px;
-    border: none;
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    border: 1px solid transparent;
     cursor: pointer;
     width: 100%;
-    transition: background 0.2s;
-    font-size: 1rem;
+    transition: all 0.2s ease;
+    font-size: 0.95rem;
     font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 1px 2px rgba(59, 130, 246, 0.25);
   }
-  .btn-primary:hover {
+  .btn-primary:hover:not(:disabled) {
     background: #2563eb;
   }
+  .btn-primary:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+  }
   @media (min-width: 768px) {
+    .btn-cancelar,
     .btn-primary {
       width: auto;
-      padding: 0.5rem 1rem;
+      padding: 0.625rem 1.35rem;
     }
   }
 
@@ -1392,10 +1721,16 @@
     border: 1px solid #cbd5e1;
     border-radius: 8px;
     overflow-x: auto;
+    max-height: 260px;
+    overflow-y: auto;
+    position: relative;
     margin-top: 0.5rem;
     background: #fff;
   }
   .materials-header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
     display: flex;
     background: #0f172a;
     color: white;

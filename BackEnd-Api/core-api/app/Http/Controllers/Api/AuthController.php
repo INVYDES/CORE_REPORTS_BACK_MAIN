@@ -18,16 +18,20 @@ class AuthController extends Controller
     public function login(LoginRequest $request): JsonResponse
     {
         $credentials = $request->validated();
+        $identifier = trim((string) $credentials['email']);
 
-        $user = Usuario::where('email', $credentials['email'])->first();
+        // Permitir inicio de sesión con correo electrónico o con ID de Empleado (ej. EMP-1001)
+        $user = Usuario::where('email', $identifier)
+            ->orWhereRaw('LOWER(numero_empleado) = ?', [strtolower($identifier)])
+            ->first();
 
-        // Mensaje genérico: no revelar si el correo existe (enumeración de usuarios).
+        // Mensaje genérico: no revelar si la cuenta existe (enumeración de usuarios).
         // Toda cuenta, sin excepción, debe validar su contraseña con Hash::check.
         if (! $user || ! Hash::check($credentials['password'], $user->password)) {
             return response()->json([
-                'message' => 'Credenciales incorrectas. Verifica tu correo y contraseña.',
+                'message' => 'Credenciales incorrectas. Verifica tu correo o ID de empleado y contraseña.',
                 'errors' => [
-                    'email' => ['Credenciales incorrectas. Verifica tu correo y contraseña.'],
+                    'email' => ['Credenciales incorrectas. Verifica tu correo o ID de empleado y contraseña.'],
                 ],
             ], 401);
         }

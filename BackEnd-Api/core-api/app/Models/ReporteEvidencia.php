@@ -42,12 +42,43 @@ class ReporteEvidencia extends Model
      */
     public function getUrlAttribute(mixed $value): ?string
     {
-        return app(EvidenceUrlService::class)->forEvidence($this);
+        try {
+            if (class_exists(\App\Services\EvidenceUrlService::class)) {
+                return app(\App\Services\EvidenceUrlService::class)->forEvidence($this);
+            }
+        } catch (\Throwable) {
+            // fallback defensivo si el servicio no resuelve
+        }
+
+        $raw = $this->getRawOriginal('url');
+        if ($raw) {
+            return (string) $raw;
+        }
+
+        if ($this->ruta) {
+            return '/storage/' . ltrim($this->ruta, '/');
+        }
+
+        return $value ? (string) $value : null;
     }
 
     public function isImageEvidence(): bool
     {
-        return app(UploadStorageService::class)->isImageType($this->tipo_archivo, $this->ruta);
+        try {
+            if (class_exists(\App\Services\UploadStorageService::class)) {
+                return app(\App\Services\UploadStorageService::class)->isImageType($this->tipo_archivo, $this->ruta);
+            }
+        } catch (\Throwable) {
+            // fallback
+        }
+
+        if ($this->tipo_archivo && str_starts_with($this->tipo_archivo, 'image/')) {
+            return true;
+        }
+
+        $ext = strtolower(pathinfo((string) ($this->ruta ?: $this->getRawOriginal('url')), PATHINFO_EXTENSION));
+
+        return in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'], true);
     }
 
     /**
@@ -61,9 +92,44 @@ class ReporteEvidencia extends Model
         $uploads = app(UploadStorageService::class);
         $disk = $this->disco ?: null;
 
-        $ruta = $this->ruta ?: $uploads->pathFromUrl((string) $this->getRawOriginal('url'), $disk);
+        $ruta = $this->ruta;
+        if (! $ruta && method_exists($uploads, 'pathFromUrl')) {
+            $ruta = $uploads->pathFromUrl((string) $this->getRawOriginal('url'), $disk);
+        }
 
-        return $ruta ? $uploads->inlineImage($ruta, $disk) : null;
+        if ($ruta && method_exists($uploads, 'inlineImage')) {
+            try {
+                return $uploads->inlineImage($ruta, $disk);
+            } catch (\Throwable) {
+                // continuar al fallback directo
+            }
+        }
+
+        if (! $ruta) {
+            return null;
+        }
+
+        try {
+            $cleanPath = ltrim(trim($ruta), '/');
+            if (\Illuminate\Support\Str::startsWith($cleanPath, 'storage/')) {
+                $cleanPath = substr($cleanPath, strlen('storage/'));
+            }
+            if (\Illuminate\Support\Str::startsWith($cleanPath, 'data:image')) {
+                return $cleanPath;
+            }
+            $diskName = $disk ?: (method_exists($uploads, 'diskName') ? $uploads->diskName() : 'public');
+            if (\Illuminate\Support\Facades\Storage::disk($diskName)->exists($cleanPath)) {
+                $bytes = \Illuminate\Support\Facades\Storage::disk($diskName)->get($cleanPath);
+                if (is_string($bytes) && $bytes !== '') {
+                    $mime = (new \finfo(FILEINFO_MIME_TYPE))->buffer($bytes) ?: 'image/jpeg';
+                    return 'data:'.$mime.';base64,'.base64_encode($bytes);
+                }
+            }
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return null;
     }
 
     /** @return BelongsTo<Reporte, $this> */

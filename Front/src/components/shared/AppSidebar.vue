@@ -22,8 +22,6 @@
   const { currentUser } = storeToRefs(authStore)
   const router = useRouter()
 
-  const buildTime = __BUILD_TIME__
-
   const rolLabels: Record<number, string> = {
     0: 'Cliente',
     1: 'Admin Técnico',
@@ -41,7 +39,7 @@
 
   const route = useRoute()
 
-  const props = defineProps<{
+  defineProps<{
     isOpen: boolean
   }>()
 
@@ -141,7 +139,7 @@
         label: 'Mi Perfil',
         path: 'company-profile',
         icon: Building2,
-        roles: [2], // Commercial Admin
+        roles: [1, 2], // Both Admins
       },
     ]
 
@@ -216,7 +214,6 @@
           <LogOut :size="18" />
           <span>Cerrar sesión</span>
         </button>
-        <div class="build-time">Built: {{ buildTime }}</div>
       </div>
     </aside>
   </div>
@@ -335,14 +332,6 @@
         color: #ef4444; // Red text
         border-color: rgba(239, 68, 68, 0.2);
       }
-    }
-
-    .build-time {
-      margin-top: 1rem;
-      font-size: 0.7rem;
-      color: rgba($text-color, 0.4);
-      text-align: center;
-      font-family: monospace;
     }
 
     .role-container {

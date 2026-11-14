@@ -1,10 +1,11 @@
 <script setup lang="ts">
-  import { ref } from 'vue'
+  import { ref, onMounted } from 'vue'
   import { useRouter } from 'vue-router'
   import { Camera, X, ArrowLeft } from 'lucide-vue-next'
   const props = defineProps<{ isModal?: boolean }>()
   const emit = defineEmits<{ (e: 'close'): void; (e: 'created'): void }>()
   import { ticketsApi } from '../../../api/tickets'
+  import { areasApi } from '../../../api/areas'
   import { useToast } from 'vue-toastification'
   import { useAuthStore } from '../../../stores/authStore'
 
@@ -12,13 +13,40 @@
   const toast = useToast()
   const auth = useAuthStore()
 
+  const ROLE_CARGO_MAP: Record<number, string> = {
+    0: 'Cliente',
+    1: 'Administrador Técnico',
+    2: 'Administrador Comercial',
+    3: 'Técnico',
+  }
+
+  const availableAreas = ref<Array<{ id: number; nombre: string }>>([])
+  onMounted(async () => {
+    try {
+      const res = await areasApi.list()
+      const list = res.data || res
+      availableAreas.value = (Array.isArray(list) ? list : [])
+        .filter((a: any) => a.activa !== false)
+        .map((a: any) => ({
+          id: a.id ?? a.idSubdependencia,
+          nombre: a.nombre,
+        }))
+    } catch {
+      availableAreas.value = []
+    }
+  })
+
   const isSubmitting = ref(false)
   const formData = ref({
-    dependencia: '',
+    area_id: null as number | null,
     solicitante: auth.currentUser?.nombre
-      ? `${auth.currentUser.nombre} ${auth.currentUser.apellidos}`
+      ? `${auth.currentUser.nombre} ${auth.currentUser.apellidos || ''}`.trim()
       : '',
-    cargo: '',
+    cargo:
+      (auth.currentUser as any)?.cargo ||
+      (auth.currentUser as any)?.puesto ||
+      ROLE_CARGO_MAP[Number(auth.currentUser?.rol ?? -1)] ||
+      '',
     asunto: '',
     prioridad: 'Media',
     descripcion: '',
@@ -54,6 +82,7 @@
     isSubmitting.value = true
     try {
       const payload: any = {
+        area_id: formData.value.area_id,
         asunto: formData.value.asunto,
         descripcion: formData.value.descripcion,
         solicitante: formData.value.solicitante,
@@ -114,10 +143,15 @@
       <form @submit.prevent="submitTicket" class="ticket-form">
         <!-- Grid-->
         <div class="form-grid">
-          <!-- Dependency -->
+          <!-- Área / Subdependencia -->
           <div class="form-group">
-            <label>Dependencia *</label>
-            <input type="text" v-model="formData.dependencia" required class="fat-input" />
+            <label>Área / Subdependencia *</label>
+            <select v-model="formData.area_id" required class="fat-input">
+              <option :value="null" disabled>Selecciona un área...</option>
+              <option v-for="area in availableAreas" :key="area.id" :value="area.id">
+                {{ area.nombre }}
+              </option>
+            </select>
           </div>
 
           <!-- Applicant-->
@@ -137,11 +171,11 @@
         <div class="form-grid">
           <!--Position/Job-->
           <div class="form-group">
-            <label>Cargo</label>
+            <label>Cargo / Puesto</label>
             <input
               type="text"
               v-model="formData.cargo"
-              placeholder="Ej. Supervisor de Turno"
+              placeholder="Puesto del solicitante"
               class="fat-input"
             />
           </div>

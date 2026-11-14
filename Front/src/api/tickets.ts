@@ -6,7 +6,6 @@ export const ticketsApi = {
   get: (id: number | string) => client.get(`/tickets/${id}`).then(r => r.data),
   create: (payload: any) => {
     const body = mapTicketForBackend(payload)
-    if (!body.folio) body.folio = `TKT-${Date.now().toString().slice(-6)}`
     return client.post('/tickets', body).then(r => r.data)
   },
   update: (id: number, data: any) => client.put(`/tickets/${id}`, data).then(r => r.data),

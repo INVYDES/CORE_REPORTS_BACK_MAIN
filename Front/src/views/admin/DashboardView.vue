@@ -105,10 +105,22 @@
         const tList = tRes.data || tRes || []
         const sList = sRes.data || sRes || []
         const rList = rRes.data || rRes || []
+        const completedTicketIds = new Set(
+          (Array.isArray(rList) ? rList : [])
+            .filter((r: any) => r.ticket_id && String(r.estatus).toLowerCase() === 'finalizado')
+            .map((r: any) => Number(r.ticket_id))
+        )
+        const completedServiceIds = new Set(
+          (Array.isArray(rList) ? rList : [])
+            .filter((r: any) => r.servicio_id && String(r.estatus).toLowerCase() === 'finalizado')
+            .map((r: any) => Number(r.servicio_id))
+        )
         const myTix = (Array.isArray(tList) ? tList : [])
           .filter(
             (t: any) =>
-              t.usuario_asignado_id === uid && !['resuelto', 'cerrado'].includes(t.estatus)
+              t.usuario_asignado_id === uid &&
+              !['resuelto', 'cerrado'].includes(t.estatus) &&
+              !completedTicketIds.has(Number(t.id))
           )
           .map((t: any) => ({
             id: t.id,
@@ -121,7 +133,12 @@
             route: 'ticket-detail',
           }))
         const mySvc = (Array.isArray(sList) ? sList : [])
-          .filter((s: any) => s.usuario_asignado_id === uid && !['realizado'].includes(s.estatus))
+          .filter(
+            (s: any) =>
+              s.usuario_asignado_id === uid &&
+              !['realizado'].includes(s.estatus) &&
+              !completedServiceIds.has(Number(s.id))
+          )
           .map((s: any) => ({
             id: s.id,
             type: 'Servicio',

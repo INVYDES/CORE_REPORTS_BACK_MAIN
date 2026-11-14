@@ -1,9 +1,11 @@
 <script setup lang="ts">
-  import { ref, computed, onMounted } from 'vue'
+  import { ref, computed, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
   import { useRouter } from 'vue-router'
   import { Search, Filter, ChevronRight, X } from 'lucide-vue-next'
   import { useAuthStore } from '../../../stores/authStore'
   import { storeToRefs } from 'pinia'
+
+  const TicketCreateView = defineAsyncComponent(() => import('./TicketCreateView.vue'))
 
   // Store initialization
   const authStore = useAuthStore()
@@ -17,6 +19,7 @@
   const router = useRouter()
   const toast = useToast()
   const tickets = ref<Ticket[]>([])
+  const showTicketModal = ref(false)
 
   const statusLabel = (code: string) =>
     (
@@ -33,19 +36,32 @@
 
   const fetchTickets = async () => {
     try {
-      const res = await client.get('/tickets', { params: { per_page: 100 } }).then(r => r.data)
+      const [res, repRes] = await Promise.all([
+        client.get('/tickets', { params: { per_page: 100 } }).then(r => r.data),
+        client
+          .get('/reportes', { params: { per_page: 100 } })
+          .then(r => r.data)
+          .catch(() => ({ data: [] })),
+      ])
       const list = res.data || res
+      const repList = repRes.data || repRes || []
+      const finalizedTicketIds = new Set(
+        (Array.isArray(repList) ? repList : [])
+          .filter((r: any) => r.ticket_id && String(r.estatus || '').toLowerCase() === 'finalizado')
+          .map((r: any) => Number(r.ticket_id))
+      )
       if (Array.isArray(list) && list.length) {
         tickets.value = list.map((x: any) => ({
           id: x.id,
           idDependencia: x.dependencia_id,
+          usuarioAsignadoId: x.usuario_asignado_id ?? null,
           folio: x.folio,
           asunto: x.asunto,
           descripcion: x.descripcion || '',
           solicitante: x.solicitante,
           cargo: x.cargo,
           prioridad: priorityLabel(x.prioridad),
-          estatus: statusLabel(x.estatus),
+          estatus: finalizedTicketIds.has(Number(x.id)) ? 'Resuelto' : statusLabel(x.estatus),
           fechaSolicitud: fmtShort(x.fecha_solicitud),
           fechaAtencion: x.fecha_atencion ? fmtShort(x.fecha_atencion) : '',
           atendio: x.asignado
@@ -57,7 +73,13 @@
       toast.error(e?.response?.data?.message || 'No se pudieron cargar los tickets')
     }
   }
-  onMounted(fetchTickets)
+  onMounted(() => {
+    fetchTickets()
+    window.addEventListener('core-reports:ticket-created', fetchTickets)
+  })
+  onUnmounted(() => {
+    window.removeEventListener('core-reports:ticket-created', fetchTickets)
+  })
 
   // Filter state
   const searchQuery = ref('')
@@ -76,6 +98,13 @@
         ticket.idDependencia !== depId
       ) {
         return false
+      }
+
+      if (currentUser.value?.rol === 3) {
+        const uid = (currentUser.value as any)?.id ?? (currentUser.value as any)?.idUsuario
+        if (Number((ticket as any).usuarioAsignadoId) !== Number(uid)) {
+          return false
+        }
       }
 
       const q = searchQuery.value.toLowerCase()
@@ -116,9 +145,34 @@
     router.push({ name: 'ticket-detail', params: { id: id } })
   }
 
-  // Navigation Create a ticket
+  // Navigation Create a ticket (opens same modal as sidebar)
   const makeTicket = () => {
-    router.push({ name: 'create-ticket' })
+    showTicketModal.value = true
+  }
+
+  const onTicketCreated = () => {
+    showTicketModal.value = false
+    fetchTickets()
+  }
+
+  const formatTicketSummary = (desc: string) => {
+    if (!desc) return { text: '—', hasPhoto: false }
+    const hasPhoto = /(https?:\/\/[^\s"'<>]+\.(?:jpg|jpeg|png|webp|gif)|📷\s*Evidencias|Evidencias Fotográficas)/i.test(desc)
+    let clean = desc
+      .replace(/[📷]?\s*Evidencias Fotográficas Adjuntas:[\s\S]*$/i, '')
+      .replace(/-?\s*Foto\s*\d+:?\s*https?:\/\/[^\s]+/gi, '')
+      .replace(/(https?:\/\/[^\s"'<>]+\.(?:jpg|jpeg|png|webp|gif)(?:\?[^\s"'<>]*)?)/gi, '')
+      .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '')
+      .replace(/[🏢👤📞✉️📋📷📌📍📎🏷️🔍⚡⚠️✅❌]/gu, '')
+      .replace(/^[ \t]+/gm, '')
+      .trim()
+    if (clean.length > 130) {
+      clean = clean.slice(0, 130) + '…'
+    }
+    return {
+      text: clean || 'Sin descripción adicional',
+      hasPhoto,
+    }
   }
 
   // Status coloring
@@ -249,7 +303,16 @@
                 </span>
                 <div class="asunto">{{ ticket.asunto }}</div>
               </div>
-              <div class="descripcion">{{ ticket.descripcion }}</div>
+              <div class="descripcion">
+                <span>{{ formatTicketSummary(ticket.descripcion).text }}</span>
+                <span
+                  v-if="formatTicketSummary(ticket.descripcion).hasPhoto"
+                  style="display: inline-block; margin-left: 6px; padding: 1px 6px; background: #eff6ff; color: #2563eb; border-radius: 4px; font-size: 0.75rem; font-weight: 600;"
+                  title="Tiene evidencias fotográficas adjuntas"
+                >
+                  Foto
+                </span>
+              </div>
             </td>
 
             <td class="align-middle">
@@ -273,6 +336,25 @@
         No se encontraron tickets con esos filtros...
       </div>
     </div>
+
+    <Teleport to="body">
+      <div
+        v-if="showTicketModal"
+        style="position: fixed; inset: 0; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 1rem;"
+      >
+        <div
+          style="background: white; border-radius: 16px; width: 100%; max-width: 800px; max-height: 90vh; overflow: hidden; position: relative; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3); display: flex; flex-direction: column;"
+        >
+          <div style="overflow-y: auto; flex: 1; padding: 1.5rem;">
+            <TicketCreateView
+              :isModal="true"
+              @close="showTicketModal = false"
+              @created="onTicketCreated"
+            />
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 

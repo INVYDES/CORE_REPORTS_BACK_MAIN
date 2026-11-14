@@ -1,5 +1,5 @@
 <script setup lang="ts">
-  import { ref, onMounted } from 'vue'
+  import { ref, reactive, onMounted, computed } from 'vue'
   import { useRoute, useRouter } from 'vue-router'
   import {
     ArrowLeft,
@@ -11,11 +11,18 @@
     AlertCircle,
   } from 'lucide-vue-next'
   import client from '../../../api/client'
+  import {
+    formatLocalDateOnly,
+    formatLocalDateTime,
+    stripUtcSuffix,
+  } from '../../../utils/reportMeta'
+  import { useToast } from 'vue-toastification'
   import { useAuthStore } from '../../../stores/authStore'
   import { storeToRefs } from 'pinia'
 
   const authStore = useAuthStore()
   const { currentUser } = storeToRefs(authStore)
+  const toast = useToast()
 
   const route = useRoute()
   const router = useRouter()
@@ -27,7 +34,23 @@
   const serviceId = Number(route.params.id)
   const service = ref<any>(null)
   const technicians = ref<any[]>([])
+  const areas = ref<any[]>([])
   const saving = ref(false)
+  const showEditModal = ref(false)
+  const savingEdit = ref(false)
+
+  const editForm = reactive({
+    asunto: '',
+    descripcion: '',
+    solicitante: '',
+    cargo: '',
+    categoria: 'preventivo',
+    prioridad: 'media',
+    estatus: 'programado',
+    area_id: null as number | null,
+    fecha_asignacion: '',
+    fecha_vencimiento: '',
+  })
 
   const statusLabel = (code: string) =>
     (
@@ -44,16 +67,7 @@
     (({ alta: 'Alta', media: 'Media', baja: 'Baja' }) as any)[code || ''] || code || '—'
   const fmt = (iso?: string | null) => {
     if (!iso) return ''
-    const d = new Date(iso)
-    return isNaN(d.getTime())
-      ? String(iso).replace('T', ' ').slice(0, 16)
-      : d.toLocaleString('es-MX', {
-          year: 'numeric',
-          month: '2-digit',
-          day: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit',
-        })
+    return formatLocalDateOnly(iso)
   }
 
   const applyService = (raw: any) => {
@@ -63,6 +77,15 @@
       service.value = null
       return
     }
+    const rawAsig = raw.fecha_asignacion ? stripUtcSuffix(String(raw.fecha_asignacion)).slice(0, 10) : ''
+    const rawVenc = raw.fecha_vencimiento ? stripUtcSuffix(String(raw.fecha_vencimiento)).slice(0, 10) : ''
+    const rawReportes = Array.isArray(raw.reportes) ? raw.reportes : []
+    const finalReport =
+      rawReportes.slice().reverse().find((r: any) => String(r.estatus || '').toLowerCase() === 'finalizado') ||
+      rawReportes[rawReportes.length - 1] ||
+      null
+    const hasFinalizadoReport = Boolean(finalReport && String(finalReport.estatus || '').toLowerCase() === 'finalizado')
+    const effectiveRawStatus = hasFinalizadoReport ? 'realizado' : raw.estatus || 'programado'
     service.value = {
       id: raw.id,
       folio: raw.folio,
@@ -70,14 +93,29 @@
       descripcion: raw.descripcion || '',
       solicitante: raw.solicitante || '—',
       cargo: raw.cargo || '',
-      estatus: statusLabel(raw.estatus),
+      categoriaRaw: raw.categoria || 'preventivo',
+      estatusRaw: effectiveRawStatus,
+      prioridadRaw: raw.prioridad || 'media',
+      areaId: raw.area_id ?? null,
+      estatus: statusLabel(effectiveRawStatus),
       prioridad: priorityLabel(raw.prioridad),
       asignadoA: raw.asignado
         ? `${raw.asignado.nombre || ''} ${raw.asignado.apellidos || ''}`.trim()
         : '',
       usuarioAsignadoId: raw.usuario_asignado_id ?? null,
-      fechaAsignacion: fmt(raw.fecha_asignacion),
-      fechaVencimiento: fmt(raw.fecha_vencimiento),
+      rawFechaAsignacion: rawAsig,
+      rawFechaVencimiento: rawVenc,
+      fechaAsignacion: rawAsig ? fmt(rawAsig) : 'No definida',
+      fechaVencimiento: rawVenc ? fmt(rawVenc) : 'Pendiente',
+      reportes: rawReportes.map((r: any) => ({
+        id: r.id,
+        folio: r.folio,
+        estatus: String(r.estatus || '').toLowerCase(),
+        fecha: r.fecha_inicio || r.created_at || '',
+        creadoPor: r.creado_por,
+      })),
+      reporteAsociadoId: finalReport?.id ?? null,
+      reporteAsociadoFolio: finalReport?.folio ?? null,
       historialModificaciones: [],
     }
   }
@@ -92,13 +130,66 @@
     try {
       const res = await client.get('/tecnicos').then(r => r.data)
       const list = res.data || res || []
+      allUsers.value = Array.isArray(list) ? list : []
       const dep =
         (currentUser.value as any)?.dependencia_id ?? (currentUser.value as any)?.idDependencia
       technicians.value = (Array.isArray(list) ? list : [])
         .filter((u: any) => u.rol === 3 && (dep === undefined || u.dependencia_id === dep))
         .map((u: any) => ({ id: u.id, nombre: u.nombre, apellidos: u.apellidos }))
     } catch {}
+    try {
+      const res = await client.get('/areas', { params: { per_page: 100 } }).then(r => r.data)
+      const list = res.data || res || []
+      if (Array.isArray(list)) areas.value = list
+    } catch {}
   })
+
+  const openEditModal = () => {
+    if (!service.value) return
+    editForm.asunto = service.value.asunto || ''
+    editForm.descripcion = service.value.descripcion || ''
+    editForm.solicitante = service.value.solicitante === '—' ? '' : service.value.solicitante || ''
+    editForm.cargo = service.value.cargo || ''
+    editForm.categoria = service.value.categoriaRaw || 'preventivo'
+    editForm.prioridad = service.value.prioridadRaw || 'media'
+    editForm.estatus = service.value.estatusRaw || 'programado'
+    editForm.area_id = service.value.areaId ?? null
+    editForm.fecha_asignacion = service.value.rawFechaAsignacion || ''
+    editForm.fecha_vencimiento = service.value.rawFechaVencimiento || ''
+    showEditModal.value = true
+  }
+
+  const saveServiceEdit = async () => {
+    if (!service.value || savingEdit.value) return
+    if (!editForm.asunto.trim()) {
+      toast.error('El asunto es obligatorio')
+      return
+    }
+    savingEdit.value = true
+    try {
+      const res = await client
+        .put(`/servicios/${serviceId}`, {
+          asunto: editForm.asunto.trim(),
+          descripcion: editForm.descripcion.trim(),
+          solicitante: editForm.solicitante.trim() || null,
+          cargo: editForm.cargo.trim() || null,
+          categoria: editForm.categoria,
+          prioridad: editForm.prioridad,
+          estatus: editForm.estatus,
+          area_id: editForm.area_id,
+          fecha_asignacion: editForm.fecha_asignacion || null,
+          fecha_vencimiento: editForm.fecha_vencimiento || null,
+        })
+        .then(r => r.data)
+      applyService(res.data || res)
+      toast.success('Servicio programado actualizado correctamente')
+      showEditModal.value = false
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || 'No se pudo actualizar el servicio')
+    } finally {
+      savingEdit.value = false
+    }
+  }
 
   const selectedTechnician = ref<any>('')
   const assignService = async () => {
@@ -114,13 +205,10 @@
         })
         .then(r => r.data)
       const raw = res.data || res
-      service.value.asignadoA = `${tech.nombre} ${tech.apellidos}`
-      service.value.usuarioAsignadoId = tech.id
-      if (wasProgramado) service.value.estatus = 'En Proceso'
-      if (raw.estatus) service.value.estatus = statusLabel(raw.estatus)
-      alert(`Servicio asignado exitosamente a ${tech.nombre} ${tech.apellidos}`)
+      applyService(raw)
+      toast.success(`Servicio asignado exitosamente a ${tech.nombre} ${tech.apellidos}`)
     } catch (e: any) {
-      alert(e?.response?.data?.message || 'No se pudo asignar el servicio')
+      toast.error(e?.response?.data?.message || 'No se pudo asignar el servicio')
     } finally {
       saving.value = false
     }
@@ -128,21 +216,32 @@
 
   const availableTechnicians = technicians
 
+  const allUsers = ref<any[]>([])
+
   const getUserName = (id: number | null) => {
     if (!id) return 'Sin Asignar'
-    const t = technicians.value.find((u: any) => u.id === id)
-    return t ? `${t.nombre} ${t.apellidos}` : 'Usuario Desconocido'
+    const t = allUsers.value.find((u: any) => u.id === id) || technicians.value.find((u: any) => u.id === id)
+    return t ? `${t.nombre} ${t.apellidos}`.trim() : 'Usuario Desconocido'
   }
 
   const formatDate = (dateString: string) => {
-    if (!dateString) return '---'
-    const date = new Date(dateString)
-    return date.toLocaleDateString('es-MX', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
+    return formatLocalDateTime(dateString)
+  }
+
+  const isServiceFinalized = computed(() => {
+    if (!service.value) return false
+    const st = String(service.value.estatusRaw || service.value.estatus || '').toLowerCase()
+    return st === 'realizado' || st === 'finalizado' || st === 'completado' || Boolean(service.value.reporteAsociadoId)
+  })
+
+  const goToCreateReport = () => {
+    if (!service.value || isServiceFinalized.value) return
+    router.push({
+      name: 'reports-new',
+      query: {
+        tipo: 'Servicio Programado',
+        origenId: String(service.value.id),
+      },
     })
   }
 </script>
@@ -158,10 +257,28 @@
           <span>Regresar a la lista</span>
         </button>
 
-        <!-- Folio -->
-        <div class="header-title">
-          <span class="folio-badge">{{ service.folio }}</span>
-          <h1>{{ service.asunto }}</h1>
+        <!-- Folio & Actions -->
+        <div style="display: flex; justify-content: space-between; align-items: flex-end; gap: 1rem; flex-wrap: wrap;">
+          <div class="header-title">
+            <span class="folio-badge">{{ service.folio }}</span>
+            <h1>{{ service.asunto }}</h1>
+          </div>
+          <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+            <button
+              v-if="currentUser?.rol === 1 || currentUser?.rol === 2"
+              @click="openEditModal"
+              style="background: #ffffff; border: 1px solid #cbd5e1; color: #334155; padding: 10px 16px; border-radius: 8px; font-size: 0.9rem; font-weight: 600; cursor: pointer;"
+            >
+              ✏️ Editar Servicio
+            </button>
+            <button
+              v-if="!isServiceFinalized && (currentUser?.rol === 1 || currentUser?.rol === 3)"
+              @click="goToCreateReport"
+              style="background: #2563eb; border: none; color: #ffffff; padding: 10px 18px; border-radius: 8px; font-size: 0.9rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);"
+            >
+              📝 Crear Reporte
+            </button>
+          </div>
         </div>
       </header>
 
@@ -215,6 +332,44 @@
           <div class="card description-card">
             <h2>Descripción del Reporte</h2>
             <p class="description-text">{{ service.descripcion }}</p>
+          </div>
+
+          <!-- Linked Reports Section -->
+          <div v-if="service.reportes && service.reportes.length > 0" class="card" style="margin-bottom: 1.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.85rem; border-bottom: 1px solid #f1f5f9; padding-bottom: 0.5rem;">
+              <h2 style="font-size: 1.05rem; color: #0f172a; margin: 0; font-weight: 700;">
+                📋 Reportes de Trabajo Vinculados ({{ service.reportes.length }})
+              </h2>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 0.6rem;">
+              <div
+                v-for="rep in service.reportes"
+                :key="rep.id"
+                style="display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; gap: 1rem; flex-wrap: wrap;"
+              >
+                <div style="display: flex; flex-direction: column; gap: 3px;">
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-weight: 700; color: #0f172a; font-size: 0.95rem;">{{ rep.folio }}</span>
+                    <span
+                      class="status-pill"
+                      style="font-size: 0.7rem; padding: 2px 8px; border-radius: 12px; font-weight: 700;"
+                      :class="rep.estatus === 'finalizado' ? 'pill-success' : 'pill-warning'"
+                    >
+                      {{ rep.estatus === 'finalizado' ? 'FINALIZADO' : 'TRABAJO PARCIAL' }}
+                    </span>
+                  </div>
+                  <span style="font-size: 0.8rem; color: #64748b;">
+                    Elaboró: {{ getUserName(rep.creadoPor) }} • {{ formatDate(rep.fecha) }}
+                  </span>
+                </div>
+                <button
+                  @click="router.push({ name: 'report-detail', params: { id: rep.id } })"
+                  style="background: #ffffff; border: 1px solid #cbd5e1; color: #1e40af; padding: 6px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;"
+                >
+                  👁️ Ver Reporte
+                </button>
+              </div>
+            </div>
           </div>
 
           <!-- History Timeline -->
@@ -312,6 +467,158 @@
       <h2>Servicio no encontrado u oculto</h2>
       <p>El servicio con este ID no existe o no te pertenece.</p>
       <button @click="goBack" class="btn-back mt-4">Regresar a la lista</button>
+    </div>
+
+    <!-- Modal Editar Servicio Programado (#21) -->
+    <div
+      v-if="showEditModal"
+      style="position: fixed; inset: 0; background: rgba(15, 23, 42, 0.55); display: flex; justify-content: center; align-items: center; z-index: 60; padding: 1rem;"
+    >
+      <div
+        style="background: #ffffff; border-radius: 12px; width: 100%; max-width: 680px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.15);"
+      >
+        <div
+          style="display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.5rem; border-bottom: 1px solid #e2e8f0;"
+        >
+          <h2 style="margin: 0; font-size: 1.15rem; color: #0f172a;">
+            ✏️ Editar Servicio Programado ({{ service?.folio }})
+          </h2>
+          <button
+            @click="showEditModal = false"
+            style="background: none; border: none; font-size: 1.5rem; color: #64748b; cursor: pointer;"
+          >
+            &times;
+          </button>
+        </div>
+
+        <div style="padding: 1.25rem 1.5rem; display: flex; flex-direction: column; gap: 1rem;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            <div>
+              <label style="display:block;font-size:0.85rem;font-weight:600;color:#475569;margin-bottom:4px;">Asunto *</label>
+              <input
+                type="text"
+                v-model="editForm.asunto"
+                style="width:100%;padding:0.6rem;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"
+              />
+            </div>
+            <div>
+              <label style="display:block;font-size:0.85rem;font-weight:600;color:#475569;margin-bottom:4px;">Área / Subdependencia</label>
+              <select
+                v-model="editForm.area_id"
+                style="width:100%;padding:0.6rem;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"
+              >
+                <option :value="null">Sin área específica</option>
+                <option v-for="a in areas" :key="a.id" :value="a.id">{{ a.nombre }}</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem;">
+            <div>
+              <label style="display:block;font-size:0.85rem;font-weight:600;color:#475569;margin-bottom:4px;">Categoría</label>
+              <select
+                v-model="editForm.categoria"
+                style="width:100%;padding:0.6rem;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"
+              >
+                <option value="preventivo">Mantenimiento Preventivo</option>
+                <option value="correctivo">Mantenimiento Correctivo</option>
+                <option value="instalacion">Instalación</option>
+                <option value="mejora">Mejora</option>
+                <option value="diagnostico">Diagnóstico</option>
+              </select>
+            </div>
+            <div>
+              <label style="display:block;font-size:0.85rem;font-weight:600;color:#475569;margin-bottom:4px;">Prioridad</label>
+              <select
+                v-model="editForm.prioridad"
+                style="width:100%;padding:0.6rem;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"
+              >
+                <option value="baja">Baja</option>
+                <option value="media">Media</option>
+                <option value="alta">Alta</option>
+              </select>
+            </div>
+            <div>
+              <label style="display:block;font-size:0.85rem;font-weight:600;color:#475569;margin-bottom:4px;">Estatus</label>
+              <select
+                v-model="editForm.estatus"
+                style="width:100%;padding:0.6rem;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"
+              >
+                <option value="programado">Programado</option>
+                <option value="en_proceso">En Proceso</option>
+                <option value="realizado">Realizado</option>
+                <option value="vencido">Vencido</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            <div>
+              <label style="display:block;font-size:0.85rem;font-weight:600;color:#475569;margin-bottom:4px;">Fecha de Asignación</label>
+              <input
+                type="date"
+                v-model="editForm.fecha_asignacion"
+                style="width:100%;padding:0.6rem;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"
+              />
+            </div>
+            <div>
+              <label style="display:block;font-size:0.85rem;font-weight:600;color:#475569;margin-bottom:4px;">Fecha de Vencimiento (Plazo)</label>
+              <input
+                type="date"
+                v-model="editForm.fecha_vencimiento"
+                style="width:100%;padding:0.6rem;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"
+              />
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            <div>
+              <label style="display:block;font-size:0.85rem;font-weight:600;color:#475569;margin-bottom:4px;">Solicitante</label>
+              <input
+                type="text"
+                v-model="editForm.solicitante"
+                style="width:100%;padding:0.6rem;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"
+              />
+            </div>
+            <div>
+              <label style="display:block;font-size:0.85rem;font-weight:600;color:#475569;margin-bottom:4px;">Cargo</label>
+              <input
+                type="text"
+                v-model="editForm.cargo"
+                style="width:100%;padding:0.6rem;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label style="display:block;font-size:0.85rem;font-weight:600;color:#475569;margin-bottom:4px;">Descripción detallada</label>
+            <textarea
+              v-model="editForm.descripcion"
+              rows="4"
+              style="width:100%;padding:0.6rem;border:1px solid #cbd5e1;border-radius:6px;box-sizing:border-box;"
+            ></textarea>
+          </div>
+        </div>
+
+        <div
+          style="display: flex; justify-content: flex-end; gap: 0.75rem; padding: 1rem 1.5rem; background: #f8fafc; border-top: 1px solid #e2e8f0; border-radius: 0 0 12px 12px;"
+        >
+          <button
+            @click="showEditModal = false"
+            :disabled="savingEdit"
+            style="background: #ffffff; border: 1px solid #cbd5e1; color: #475569; padding: 0.55rem 1.1rem; border-radius: 6px; font-weight: 600; cursor: pointer;"
+          >
+            Cancelar
+          </button>
+          <button
+            @click="saveServiceEdit"
+            :disabled="savingEdit"
+            style="background: #2563eb; border: none; color: #ffffff; padding: 0.55rem 1.25rem; border-radius: 6px; font-weight: 600; cursor: pointer;"
+          >
+            {{ savingEdit ? 'Guardando...' : 'Guardar Cambios' }}
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>

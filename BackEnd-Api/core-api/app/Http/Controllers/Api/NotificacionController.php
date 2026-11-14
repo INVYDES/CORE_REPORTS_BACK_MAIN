@@ -19,9 +19,17 @@ class NotificacionController extends Controller
 {
     use EnsuresDependencia;
 
+    private function authUser(Request $request): ?Usuario
+    {
+        $user = $request->user() ?? auth('sanctum')->user() ?? auth()->user();
+
+        return $user instanceof Usuario ? $user : null;
+    }
+
     public function index(Request $request): JsonResponse
     {
         $q = Notificacion::query();
+        $user = $this->authUser($request);
 
         if ($request->filled('estatus')) {
             $q->where('estatus', $request->string('estatus'));
@@ -31,6 +39,15 @@ class NotificacionController extends Controller
         }
         if ($request->filled('usuario_id')) {
             $q->where('usuario_id', (int) $request->get('usuario_id'));
+        } elseif ($user && $user->rol === 3) {
+            // Técnicos solo ven notificaciones dirigidas a ellos (por usuario_id o por email de destinatario) o broadcast
+            $q->where(function ($sub) use ($user) {
+                $sub->where('usuario_id', $user->id)
+                    ->orWhere('destinatario', $user->email)
+                    ->orWhere(function ($b) {
+                        $b->whereNull('usuario_id')->whereNull('destinatario');
+                    });
+            });
         }
         if ($request->filled('area_id')) {
             $areaId = (int) $request->get('area_id');
@@ -181,7 +198,15 @@ class NotificacionController extends Controller
 
     public function markAllRead(Request $request): JsonResponse
     {
-        Notificacion::whereNull('leida_at')->update(['leida_at' => now()]);
+        $user = $this->authUser($request);
+        $q = Notificacion::whereNull('leida_at');
+        if ($user && $user->rol === 3) {
+            $q->where(function ($sub) use ($user) {
+                $sub->where('usuario_id', $user->id)
+                    ->orWhere('destinatario', $user->email);
+            });
+        }
+        $q->update(['leida_at' => now()]);
 
         return response()->json(['message' => 'Todas marcadas como leídas']);
     }

@@ -10,11 +10,14 @@
     Mail,
     UploadCloud,
     Users,
-    Settings,
     Save,
     CreditCard,
     Eye,
     EyeOff,
+    Share2,
+    Copy,
+    Check,
+    ExternalLink,
   } from 'lucide-vue-next'
 
   const authStore = useAuthStore()
@@ -50,6 +53,28 @@
       limiteUsuarios: limite,
       nivelUsuarios: tierLabel(limite),
       logo: raw.logo || '',
+      slug: raw.slug || (raw.nombre ? raw.nombre.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') : ''),
+    }
+  }
+
+  const copiedPublicLink = ref(false)
+  const publicLink = computed(() => {
+    if (!company.value?.slug) return ''
+    const origin = window.location.origin
+    return `${origin}/solicitar/${company.value.slug}`
+  })
+
+  const copyPublicLink = async () => {
+    if (!publicLink.value) return
+    try {
+      await navigator.clipboard.writeText(publicLink.value)
+      copiedPublicLink.value = true
+      toast.success('¡Enlace de clientes copiado al portapapeles!')
+      setTimeout(() => {
+        copiedPublicLink.value = false
+      }, 3000)
+    } catch {
+      toast.error('No se pudo copiar el enlace')
     }
   }
 
@@ -58,8 +83,14 @@
       // El endpoint /empresa resuelve la dependencia del usuario en sesión
       const res = await client.get('/empresa').then(r => r.data)
       company.value = mapCompany(res.data || res)
-    } catch {
-      company.value = null
+    } catch (err) {
+      console.warn('Error al cargar /empresa, usando datos de la sesión como respaldo:', err)
+      const sessionDep = (currentUser.value as any)?.dependencia
+      if (sessionDep) {
+        company.value = mapCompany(sessionDep)
+      } else {
+        company.value = null
+      }
     }
   }
 
@@ -67,16 +98,21 @@
     if (!company.value) return
     savingCompany.value = true
     try {
-      const res = await client
-        .put('/empresa', {
-          nombre: company.value.nombre,
-          rfc: company.value.rfc,
-          correoContacto: company.value.correoContacto,
-          correoReportes: company.value.correoReportes,
-          telefono: company.value.telefono,
-        })
-        .then(r => r.data)
-      company.value = mapCompany(res.data || res)
+      const payload: Record<string, any> = {
+        correoContacto: company.value.correoContacto || '',
+        correoReportes: company.value.correoReportes || '',
+        telefono: company.value.telefono || '',
+      }
+      if (company.value.nombre) {
+        payload.nombre = company.value.nombre
+      }
+      if (company.value.rfc) {
+        payload.rfc = company.value.rfc
+      }
+
+      const res = await client.put('/empresa', payload).then(r => r.data)
+      const data = res.data || res
+      company.value = mapCompany(data)
       toast.success('Datos de la empresa actualizados')
     } catch (e: any) {
       toast.error(e?.response?.data?.message || 'No se pudieron guardar los datos')
@@ -140,18 +176,21 @@
   // 3. Team members: real users of this dependencia
   const localUsers = ref<any[]>([])
 
-  const mapUser = (u: any) => ({
-    idUsuario: u.id,
-    idDependencia: u.dependencia_id,
-    numeroEmpleado: u.numero_empleado || `EMP-${String(u.id).padStart(3, '0')}`,
-    rol: Number(u.rol),
-    nombre: u.nombre || '',
-    apellidos: u.apellidos || '',
-    correo: u.email || '',
-    estado: u.estado ? 1 : 0,
-    fechaCreacion: u.created_at,
-    ultimoAcceso: u.ultimo_acceso,
-  })
+  const mapUser = (u: any) => {
+    const depId = u.dependencia_id || (currentUser.value as any)?.dependencia_id || 1
+    return {
+      idUsuario: u.id,
+      idDependencia: u.dependencia_id,
+      numeroEmpleado: u.numero_empleado || `EMP-${depId}${String(u.id).padStart(3, '0')}`,
+      rol: Number(u.rol),
+      nombre: u.nombre || '',
+      apellidos: u.apellidos || '',
+      correo: u.email || '',
+      estado: u.estado ? 1 : 0,
+      fechaCreacion: u.created_at,
+      ultimoAcceso: u.ultimo_acceso,
+    }
+  }
 
   const loadUsers = async () => {
     try {
@@ -165,8 +204,9 @@
 
   const teamMembers = computed(() => localUsers.value)
 
+  // Cuenta todos los usuarios activos de la empresa (alineado con UsuarioController en backend)
   const usedSeats = computed(() => {
-    return localUsers.value.filter(u => u.estado === 1 && u.rol === 3).length
+    return localUsers.value.filter(u => u.estado === 1).length
   })
 
   const seatsPercentage = computed(() => {
@@ -180,6 +220,10 @@
       ? `${(currentUser.value as any)?.nombre ?? ''} ${(currentUser.value as any)?.apellidos ?? ''}`.trim()
       : ''
     return name || 'N/A'
+  })
+
+  const adminRoleLabel = computed(() => {
+    return currentUser.value?.rol === 1 ? 'Administrador Técnico' : 'Administrador Comercial'
   })
 
   // Helper to get role text
@@ -198,6 +242,25 @@
     }
   }
 
+  // Genera el siguiente ID de empleado consecutivo: EMP-{id_dependencia}{consecutivo} (ej. EMP-1001, EMP-1002...)
+  const getNextEmployeeNumber = () => {
+    const depId =
+      (currentUser.value as any)?.dependencia_id ??
+      (currentUser.value as any)?.idDependencia ??
+      1
+    const prefix = `EMP-${depId}`
+    let maxNum = 0
+    for (const u of localUsers.value) {
+      const numEmp = String(u.numeroEmpleado || u.numero_empleado || '').toUpperCase().trim()
+      if (numEmp.startsWith(prefix)) {
+        const suffix = numEmp.slice(prefix.length)
+        const n = parseInt(suffix, 10)
+        if (!isNaN(n) && n > maxNum) maxNum = n
+      }
+    }
+    return `${prefix}${String(maxNum + 1).padStart(3, '0')}`
+  }
+
   // User Modal State
   const isUserModalOpen = ref(false)
   const isEditing = ref(false)
@@ -208,7 +271,7 @@
     apellidos: '',
     correo: '',
     numeroEmpleado: '',
-    rol: 0,
+    rol: 3,
     password: '',
   })
 
@@ -218,10 +281,8 @@
       nombre: '',
       apellidos: '',
       correo: '',
-      numeroEmpleado: `EMP-${Math.floor(Math.random() * 1000)
-        .toString()
-        .padStart(3, '0')}`,
-      rol: 0,
+      numeroEmpleado: getNextEmployeeNumber(),
+      rol: 3,
       password: '',
     }
     isEditing.value = false
@@ -293,8 +354,79 @@
     }
   }
 
-  const showPlanInfo = () => {
-    toast.info('El cambio de plan se gestiona con soporte. Contáctanos para ampliar tu licencia.')
+  // Modal de Cambio de Plan
+  const isPlanModalOpen = ref(false)
+  const availablePlans = ref<any[]>([])
+  const buyingPlanId = ref<number | null>(null)
+
+  const loadPlans = async () => {
+    try {
+      const res = await client.get('/licencias/disponibles').then(r => r.data)
+      const list = res.data || res || []
+      if (Array.isArray(list) && list.length > 0) {
+        availablePlans.value = list
+        return
+      }
+    } catch {
+      /* fallback */
+    }
+    availablePlans.value = [
+      {
+        id: 1,
+        nombre: 'Plan Básico',
+        tipo: 'mensual',
+        precio: 499,
+        limite_usuarios: 5,
+        limite_reportes_mensuales: 100,
+      },
+      {
+        id: 2,
+        nombre: 'Plan Intermedio',
+        tipo: 'mensual',
+        precio: 999,
+        limite_usuarios: 20,
+        limite_reportes_mensuales: 500,
+      },
+      {
+        id: 3,
+        nombre: 'Plan Empresa',
+        tipo: 'anual',
+        precio: 9990,
+        limite_usuarios: 100,
+        limite_reportes_mensuales: 5000,
+      },
+    ]
+  }
+
+  const showPlanInfo = async () => {
+    if (availablePlans.value.length === 0) await loadPlans()
+    isPlanModalOpen.value = true
+  }
+
+  const selectPlan = async (plan: any) => {
+    if (buyingPlanId.value !== null) return
+    buyingPlanId.value = plan.id
+    try {
+      const res = await client
+        .post(`/licencias/${plan.id}/comprar-mercadopago`, {
+          ciclo: plan.tipo || 'mensual',
+        })
+        .then(r => r.data)
+      const url = res?.init_point || res?.data?.init_point || res?.sandbox_init_point
+      if (url) {
+        window.location.href = url
+        return
+      }
+      toast.info('Solicitud registrada. Contacta a soporte para activar tu nuevo plan.')
+      isPlanModalOpen.value = false
+    } catch (e: any) {
+      toast.info(
+        e?.response?.data?.message ||
+          'Para activar este plan de forma inmediata, contacta a soporte comercial.'
+      )
+    } finally {
+      buyingPlanId.value = null
+    }
   }
 
   onMounted(() => {
@@ -334,7 +466,7 @@
               </div>
 
               <div class="form-group">
-                <label>Administrador Comercial</label>
+                <label>{{ adminRoleLabel }}</label>
                 <div class="input-with-icon">
                   <User :size="16" class="icon-input" />
                   <input type="text" :value="adminName" readonly class="readonly-input" />
@@ -342,16 +474,53 @@
               </div>
 
               <div class="form-group">
-                <label>Correo de Contacto</label>
+                <label>Correo de Contacto de la Empresa</label>
                 <div class="input-with-icon">
                   <Mail :size="16" class="icon-input" />
                   <input
                     type="email"
-                    :value="company.correoContacto"
-                    readonly
-                    class="readonly-input"
+                    v-model="company.correoContacto"
+                    class="editable-input"
+                    placeholder="contacto@tuempresa.com"
                   />
                 </div>
+              </div>
+
+              <div class="form-group">
+                <label>Correo para Recepción de Reportes</label>
+                <div class="input-with-icon">
+                  <Mail :size="16" class="icon-input" />
+                  <input
+                    type="email"
+                    v-model="company.correoReportes"
+                    class="editable-input"
+                    placeholder="reportes@tuempresa.com"
+                  />
+                </div>
+                <span class="text-xs text-slate-400 mt-1 block">
+                  A este correo se enviarán copias y notificaciones de los reportes generados.
+                </span>
+              </div>
+
+              <div class="form-group">
+                <label>Teléfono de la Empresa</label>
+                <input
+                  type="text"
+                  v-model="company.telefono"
+                  class="editable-input w-full"
+                  placeholder="(000) 000-0000"
+                />
+              </div>
+
+              <div class="pt-2">
+                <button
+                  class="btn-primary flex items-center gap-2"
+                  @click="saveCompany"
+                  :disabled="savingCompany"
+                >
+                  <Save :size="16" />
+                  {{ savingCompany ? 'Guardando...' : 'Guardar Datos de Empresa' }}
+                </button>
               </div>
             </div>
 
@@ -407,6 +576,56 @@
         </div>
       </section>
 
+      <!-- SECTION: Enlace para Clientes (Portal de Solicitud de Tickets) -->
+      <section class="settings-section">
+        <div class="section-header">
+          <Share2 class="text-blue-600" :size="20" />
+          <h3>Enlace Público para tus Clientes</h3>
+        </div>
+
+        <div class="section-body card flex flex-col gap-4">
+          <p class="text-sm text-slate-600 leading-relaxed">
+            Comparte esta liga con tus clientes, sucursales o personal en sitio para que puedan levantar tickets de servicio directamente <strong>sin necesidad de iniciar sesión</strong>.
+          </p>
+
+          <div class="flex items-center gap-2 flex-wrap">
+            <div class="flex-1 min-w-[280px]">
+              <input
+                type="text"
+                readonly
+                :value="publicLink"
+                class="w-full text-xs font-mono bg-slate-50 border border-slate-300 rounded px-3 py-2 text-slate-700 select-all focus:outline-none"
+              />
+            </div>
+            <button
+              type="button"
+              @click="copyPublicLink"
+              class="btn-primary flex items-center gap-1.5 text-xs px-4 py-2 cursor-pointer"
+            >
+              <Check v-if="copiedPublicLink" :size="15" />
+              <Copy v-else :size="15" />
+              <span>{{ copiedPublicLink ? '¡Enlace Copiado!' : 'Copiar Enlace' }}</span>
+            </button>
+            <a
+              :href="publicLink"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="btn-outline flex items-center gap-1.5 text-xs px-3 py-2"
+            >
+              <ExternalLink :size="15" />
+              <span>Ver Formulario</span>
+            </a>
+          </div>
+
+          <div class="bg-blue-50/70 border border-blue-200/60 rounded-lg p-3 text-xs text-blue-800 flex items-start gap-2">
+            <span class="text-base leading-none">💡</span>
+            <span>
+              <strong>Recomendación:</strong> Puedes enviar este enlace por WhatsApp a los gerentes o encargados de tus clientes. Cuando manden un reporte, entrará directamente a tu panel de tickets con el nombre del lugar y sus datos de contacto.
+            </span>
+          </div>
+        </div>
+      </section>
+
       <!-- SECTION B: Suscripción y Facturación -->
       <section class="settings-section">
         <div class="section-header">
@@ -415,7 +634,7 @@
         </div>
 
         <div class="section-body card flex flex-col gap-6">
-          <div class="flex items-center justify-between border-b border-slate-100 pb-4">
+          <div class="flex items-center justify-between border-b border-slate-100 pb-4 flex-wrap gap-3">
             <div>
               <p class="text-sm font-semibold text-slate-500 mb-1">Plan Actual</p>
               <div class="flex items-center gap-2">
@@ -425,6 +644,10 @@
                 >
               </div>
             </div>
+            <button @click="showPlanInfo" class="btn-outline flex items-center gap-2 text-sm">
+              <CreditCard :size="16" />
+              Cambiar / Mejorar Plan
+            </button>
           </div>
 
           <div>
@@ -520,7 +743,7 @@
               class="user-card card relative group"
             >
               <button
-                v-if="currentUser?.rol === 2"
+                v-if="currentUser?.rol === 2 || currentUser?.rol === 1"
                 @click="openModalForEdit(user)"
                 class="absolute top-3 right-3 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity hover:text-blue-600"
               >
@@ -559,73 +782,71 @@
           </div>
         </div>
       </section>
-
-      <!-- SECTION D: Configuración de correo -->
-      <section class="settings-section">
-        <div class="section-header">
-          <Settings class="text-emerald-600" :size="20" />
-          <h3>Configuración de Correo (Envío de reportes)</h3>
-        </div>
-
-        <div class="section-body card">
-          <p class="text-sm text-slate-500 mb-5">
-            El servidor SMTP se configura a nivel del backend (variables
-            <code class="text-slate-700 bg-slate-100 px-1 rounded">MAIL_*</code>). Aquí defines los
-            correos de tu empresa que se usan como contacto y como destino de los reportes.
-          </p>
-
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <div class="form-group">
-              <label>Correo de Contacto</label>
-              <input
-                type="email"
-                v-model="company.correoContacto"
-                class="editable-input w-full"
-                placeholder="contacto@tuempresa.com"
-              />
-            </div>
-
-            <div class="form-group">
-              <label>Correo para Reportes</label>
-              <input
-                type="email"
-                v-model="company.correoReportes"
-                class="editable-input w-full"
-                placeholder="reportes@tuempresa.com"
-              />
-            </div>
-
-            <div class="form-group">
-              <label>Teléfono</label>
-              <input
-                type="text"
-                v-model="company.telefono"
-                class="editable-input w-full"
-                placeholder="(000) 000-0000"
-              />
-            </div>
-          </div>
-
-          <!-- Footer Actions -->
-          <div
-            class="smtp-actions mt-8 pt-5 border-t border-slate-100 flex flex-wrap gap-3 items-center justify-end"
-          >
-            <button
-              class="btn-primary flex items-center gap-2"
-              @click="saveCompany"
-              :disabled="savingCompany"
-            >
-              <Save :size="16" />
-              {{ savingCompany ? 'Guardando...' : 'Guardar Cambios' }}
-            </button>
-          </div>
-        </div>
-      </section>
     </div>
 
     <div v-else class="empty-state">
       <p>No se encontraron datos de la empresa. Por favor, contacte a soporte.</p>
     </div>
+
+    <!-- Plan Upgrade Modal -->
+    <Teleport to="body">
+      <div
+        v-if="isPlanModalOpen"
+        class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+      >
+        <div
+          class="bg-white rounded-xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]"
+        >
+          <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+            <div>
+              <h3 class="text-lg font-bold text-slate-800">Cambiar o Mejorar Plan</h3>
+              <p class="text-xs text-slate-500 mt-0.5">
+                Selecciona el plan que mejor se adapte al tamaño de tu equipo
+              </p>
+            </div>
+            <button @click="isPlanModalOpen = false" class="text-slate-400 hover:text-slate-600">
+              ✕
+            </button>
+          </div>
+          <div class="p-6 overflow-y-auto grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div
+              v-for="plan in availablePlans"
+              :key="plan.id"
+              class="border border-slate-200 rounded-xl p-4 flex flex-col justify-between hover:border-blue-500 transition-all"
+            >
+              <div>
+                <h4 class="font-bold text-slate-900 text-base">
+                  {{ plan.nombre || `Plan ${plan.tipo || ''}` }}
+                </h4>
+                <p class="text-2xl font-extrabold text-blue-600 mt-2">
+                  ${{ Number(plan.precio || 0).toLocaleString('es-MX') }}
+                  <span class="text-xs font-normal text-slate-500">/{{ plan.tipo || 'mes' }}</span>
+                </p>
+                <ul class="text-xs text-slate-600 mt-4 space-y-2 list-none p-0">
+                  <li>✓ Hasta {{ plan.limite_usuarios ?? plan.limiteUsuarios ?? 10 }} usuarios</li>
+                  <li v-if="plan.limite_reportes_mensuales">
+                    ✓ {{ plan.limite_reportes_mensuales }} reportes/mes
+                  </li>
+                  <li>✓ Soporte y respaldos incluidos</li>
+                </ul>
+              </div>
+              <button
+                class="btn-primary w-full mt-5 text-sm"
+                :disabled="buyingPlanId === plan.id"
+                @click="selectPlan(plan)"
+              >
+                {{ buyingPlanId === plan.id ? 'Procesando...' : 'Elegir Plan' }}
+              </button>
+            </div>
+          </div>
+          <div class="px-6 py-3 bg-slate-50 border-t border-slate-100 flex justify-end">
+            <button type="button" @click="isPlanModalOpen = false" class="btn-outline">
+              Cancelar
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- User Form Modal -->
     <Teleport to="body">
@@ -697,7 +918,7 @@
                   type="text"
                   v-model="userForm.numeroEmpleado"
                   class="editable-input"
-                  placeholder="EMP-000"
+                  placeholder="EMP-1001"
                 />
               </div>
               <div class="form-group mb-0">

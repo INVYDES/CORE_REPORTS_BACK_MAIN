@@ -2,11 +2,17 @@
   import { ref, onMounted, computed } from 'vue'
   import { useRouter } from 'vue-router'
   import { Search, Filter, ChevronRight, X } from 'lucide-vue-next'
+  import { useAuthStore } from '../../../stores/authStore'
+  import { storeToRefs } from 'pinia'
 
   import client from '../../../api/client'
+  import { stripUtcSuffix, parseLocalDate } from '../../../utils/reportMeta'
   import { useToast } from 'vue-toastification'
 
   import type { Service } from '../../../data/mockServicios'
+
+  const authStore = useAuthStore()
+  const { currentUser } = storeToRefs(authStore)
 
   const router = useRouter()
   const toast = useToast()
@@ -23,21 +29,36 @@
     )[code] || code
   const priorityLabel = (code: string | null) =>
     (({ alta: 'Alta', media: 'Media', baja: 'Baja' }) as any)[code || ''] || code || ''
-  const fmtShort = (iso?: string | null) => (iso ? String(iso).replace('T', ' ').slice(0, 16) : '')
+  const fmtShort = (iso?: string | null) => (iso ? stripUtcSuffix(iso).slice(0, 10) : '')
 
   const fetchServices = async () => {
     try {
-      const res = await client.get('/servicios', { params: { per_page: 100 } }).then(r => r.data)
+      const [res, repRes] = await Promise.all([
+        client.get('/servicios', { params: { per_page: 100 } }).then(r => r.data),
+        client
+          .get('/reportes', { params: { per_page: 100 } })
+          .then(r => r.data)
+          .catch(() => ({ data: [] })),
+      ])
       const list = res.data || res
+      const repList = repRes.data || repRes || []
+      const finalizedServiceIds = new Set(
+        (Array.isArray(repList) ? repList : [])
+          .filter(
+            (r: any) => r.servicio_id && String(r.estatus || '').toLowerCase() === 'finalizado'
+          )
+          .map((r: any) => Number(r.servicio_id))
+      )
       if (Array.isArray(list) && list.length) {
         services.value = list.map((x: any) => ({
           id: x.id,
           idDependencia: x.dependencia_id,
+          usuarioAsignadoId: x.usuario_asignado_id ?? null,
           folio: x.folio,
           asunto: x.asunto,
           descripcion: x.descripcion || '',
           categoria: x.categoria,
-          estatus: statusLabel(x.estatus),
+          estatus: finalizedServiceIds.has(Number(x.id)) ? 'Realizado' : statusLabel(x.estatus),
           prioridad: priorityLabel(x.prioridad),
           fechaAsignacion: fmtShort(x.fecha_asignacion),
           fechaVencimiento: fmtShort(x.fecha_vencimiento),
@@ -59,9 +80,35 @@
   const statusFilter = ref('')
   const dateFilter = ref('')
 
+  const isSinAsignar = (service: Service) => {
+    return (
+      !service.asignadoA ||
+      service.asignadoA.trim() === '' ||
+      !service.usuarioAsignadoId ||
+      service.estatus === 'Sin Asignar'
+    )
+  }
+
   // Filtered services
   const filteredServices = computed(() => {
-    return services.value.filter(service => {
+    const list = services.value.filter(service => {
+      const depId =
+        (currentUser.value as any)?.dependencia_id ?? (currentUser.value as any)?.idDependencia
+      if (
+        service.idDependencia !== undefined &&
+        depId !== undefined &&
+        service.idDependencia !== depId
+      ) {
+        return false
+      }
+
+      if (currentUser.value?.rol === 3) {
+        const uid = (currentUser.value as any)?.id ?? (currentUser.value as any)?.idUsuario
+        if (Number((service as any).usuarioAsignadoId) !== Number(uid)) {
+          return false
+        }
+      }
+
       const q = searchQuery.value.toLowerCase()
       const matchesSearch =
         searchQuery.value === '' ||
@@ -75,6 +122,16 @@
         (service.fechaVencimiento || '').slice(0, 10) === dateFilter.value
 
       return matchesSearch && matchesStatus && matchesDate
+    })
+
+    // Ordenar: primero los que están sin asignar, luego por ID más reciente
+    return list.slice().sort((a, b) => {
+      const aSin = isSinAsignar(a) ? 1 : 0
+      const bSin = isSinAsignar(b) ? 1 : 0
+      if (aSin !== bSin) {
+        return bSin - aSin // Los sin asignar primero
+      }
+      return (Number(b.id) || 0) - (Number(a.id) || 0)
     })
   })
 
@@ -129,16 +186,19 @@
   }
 
   const getDueDateWarning = (fechaVencimiento: string) => {
-    // Current date for comparison
+    if (!fechaVencimiento) return { text: 'Sin plazo definido', class: 'text-gris' }
+    const due = parseLocalDate(fechaVencimiento)
+    if (!due) return { text: `Vence el ${fechaVencimiento}`, class: 'text-gris' }
     const today = new Date()
-    const due = new Date(fechaVencimiento)
-    const diffTime = due.getTime() - today.getTime()
+    today.setHours(0, 0, 0, 0)
+    const dueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate())
+    const diffTime = dueDay.getTime() - today.getTime()
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
 
     // Red: Expired!
-    if (diffDays < 0) return { text: '¡Vencido!', class: 'text-rojo' }
+    if (diffDays < 0) return { text: `¡Vencido! (${fechaVencimiento})`, class: 'text-rojo' }
     // Orange: Due in 3 days or less!
-    if (diffDays <= 3) return { text: `Vence en ${diffDays} días`, class: 'text-naranja' }
+    if (diffDays <= 3) return { text: `Vence en ${diffDays} días (${fechaVencimiento})`, class: 'text-naranja' }
     // Gray: Safe
     return { text: `Vence el ${fechaVencimiento}`, class: 'text-gris' }
   }

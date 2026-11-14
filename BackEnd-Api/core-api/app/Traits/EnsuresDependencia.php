@@ -19,7 +19,7 @@ trait EnsuresDependencia
     /** Usuario autenticado con el tipo concreto del proyecto. */
     protected function usuarioActual(): Usuario
     {
-        $user = auth()->user();
+        $user = request()->user() ?? auth('sanctum')->user() ?? auth()->user();
 
         if (! $user instanceof Usuario) {
             abort(401, 'No autenticado.');

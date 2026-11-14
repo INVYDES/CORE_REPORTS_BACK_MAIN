@@ -567,6 +567,7 @@
   import { mockServices, type Service } from '../../data/mockServicios'
   import { mockUsers, type Usuario } from '../../data/mockUsers'
   import { mockEncuestas } from '../../data/mockEncuestas'
+  import { parseLocalDate, stripUtcSuffix } from '../../utils/reportMeta'
   import html2pdf from 'html2pdf.js'
 
   // Initialize auth
@@ -627,8 +628,8 @@
     if (timeFilter.value === 'Histórico') return true
     if (!dateStr) return false
 
-    const d = new Date(dateStr)
-    if (isNaN(d.getTime())) return false
+    const d = parseLocalDate(dateStr)
+    if (!d) return false
 
     const now = new Date()
 
@@ -653,21 +654,228 @@
     }
   }
 
-  // 2. Original Filtered Data (by company and time filter)
+  // 2. Real & Filtered Data (by company and time filter)
+  const realReports = ref<Reporte[]>([])
+  const realTickets = ref<Ticket[]>([])
+  const realServices = ref<Service[]>([])
+  const realEncuestas = ref<any[]>([])
+  const hasLoadedRealData = ref(false)
+
+  const tipoLabel = (code: string): Reporte['tipoReporte'] =>
+    (({ ticket: 'Ticket', servicio: 'Servicio Programado', libre: 'Libre' }) as any)[code] ||
+    'Libre'
+  const catLabel = (code: string): Reporte['categoria'] =>
+    (
+      ({
+        preventivo: 'Mantenimiento Preventivo',
+        correctivo: 'Mantenimiento Correctivo',
+        instalacion: 'Instalación',
+        mejora: 'Mejora',
+        diagnostico: 'Diagnóstico',
+      }) as any
+    )[code] || 'Mantenimiento Correctivo'
+  const estatusRepLabel = (code: string): Reporte['estatusReporte'] =>
+    (
+      ({
+        finalizado: 'Cerrado / Trabajo Finalizado',
+        abierto: 'Abierto / Trabajo Parcial',
+        parcial: 'Abierto / Trabajo Parcial',
+        descartado: 'Descartado / Cancelado',
+      }) as any
+    )[code] || 'Abierto / Trabajo Parcial'
+  const ticketStatusLabel = (code: string): Ticket['estatus'] =>
+    (
+      ({
+        abierto: 'Abierto',
+        en_proceso: 'En Proceso',
+        resuelto: 'Resuelto',
+        cerrado: 'Cerrado',
+      }) as any
+    )[code] || 'Abierto'
+  const priorityLabel = (code: string): Ticket['prioridad'] =>
+    (({ alta: 'Alta', media: 'Media', baja: 'Baja' }) as any)[code] || 'Media'
+  const serviceStatusLabel = (code: string): Service['estatus'] =>
+    (
+      ({
+        programado: 'Programado',
+        en_proceso: 'En Proceso',
+        realizado: 'Realizado',
+        vencido: 'Vencido',
+      }) as any
+    )[code] || 'Programado'
+
+  const loadRealOperationalData = async () => {
+    try {
+      const [rRes, tRes, sRes, eRes] = await Promise.all([
+        client
+          .get('/reportes', { params: { per_page: 200 } })
+          .then(r => r.data)
+          .catch(() => ({ data: [] })),
+        client
+          .get('/tickets', { params: { per_page: 200 } })
+          .then(r => r.data)
+          .catch(() => ({ data: [] })),
+        client
+          .get('/servicios', { params: { per_page: 200 } })
+          .then(r => r.data)
+          .catch(() => ({ data: [] })),
+        client
+          .get('/encuestas', { params: { per_page: 200 } })
+          .then(r => r.data)
+          .catch(() => ({ data: [] })),
+      ])
+      const rList = rRes.data || rRes || []
+      const tList = tRes.data || tRes || []
+      const sList = sRes.data || sRes || []
+      const eList = eRes.data || eRes || []
+
+      const finalizedTicketIds = new Set<number>()
+      const finalizedServiceIds = new Set<number>()
+
+      if (Array.isArray(rList)) {
+        rList.forEach((r: any) => {
+          const st = String(r.estatus || '').toLowerCase()
+          if (st === 'finalizado' || st.includes('finalizado') || st.includes('cerrado')) {
+            if (r.ticket_id) finalizedTicketIds.add(Number(r.ticket_id))
+            if (r.servicio_id) finalizedServiceIds.add(Number(r.servicio_id))
+          }
+        })
+
+        realReports.value = rList.map((r: any) => {
+          const execIds = Array.isArray(r.ejecutores)
+            ? r.ejecutores.map((e: any) => Number(e.usuario_id ?? e)).filter(Boolean)
+            : []
+          if (execIds.length === 0 && r.responsable_id) execIds.push(Number(r.responsable_id))
+          if (execIds.length === 0 && r.creado_por) execIds.push(Number(r.creado_por))
+          const rawOrigen = r.ticket_id ?? r.servicio_id ?? null
+          return {
+            idReporte: Number(r.id),
+            folio: r.folio,
+            idDependencia: r.dependencia_id,
+            idSubdependencia: r.area_id ?? undefined,
+            creadoPor: r.creado_por ? Number(r.creado_por) : undefined,
+            tipoReporte: tipoLabel(r.tipo),
+            origenDatosId: rawOrigen !== null && rawOrigen !== undefined ? Number(rawOrigen) : null,
+            categoria: catLabel(r.categoria),
+            fechaElaboracion: stripUtcSuffix(r.fecha_inicio || r.created_at || ''),
+            fechaHoraInicio: stripUtcSuffix(r.fecha_inicio || ''),
+            fechaHoraFin: stripUtcSuffix(r.fecha_fin || ''),
+            horaSalidaBase: r.hora_salida ? stripUtcSuffix(r.hora_salida) : undefined,
+            horaLlegadaSitio: r.hora_llegada ? stripUtcSuffix(r.hora_llegada) : undefined,
+            horaRegresoABase: r.hora_regreso ? stripUtcSuffix(r.hora_regreso) : undefined,
+            desarrolloActividades: r.desarrollo || '',
+            esRetrabajo: !!r.es_retrabajo,
+            responsableId: r.responsable_id ? Number(r.responsable_id) : undefined,
+            ejecutoresIds: execIds,
+            materiales: [],
+            evidenciaFotografica: [],
+            estatusReporte: estatusRepLabel(r.estatus),
+          } as Reporte
+        })
+      }
+
+      if (Array.isArray(tList)) {
+        realTickets.value = tList.map((t: any) => {
+          const tid = Number(t.id)
+          const rawStatus = finalizedTicketIds.has(tid) ? 'resuelto' : t.estatus
+          return {
+            id: tid,
+            idDependencia: t.dependencia_id,
+            folio: t.folio,
+            asunto: t.asunto,
+            descripcion: t.descripcion || '',
+            solicitante: t.solicitante || '',
+            cargo: t.cargo || '',
+            prioridad: priorityLabel(t.prioridad),
+            estatus: ticketStatusLabel(rawStatus),
+            fechaSolicitud: stripUtcSuffix(t.fecha_solicitud || t.created_at || ''),
+            fechaAtencion: stripUtcSuffix(t.fecha_atencion || ''),
+            atendio: '',
+          }
+        })
+      }
+
+      if (Array.isArray(sList)) {
+        realServices.value = sList.map((s: any) => {
+          const sid = Number(s.id)
+          const rawStatus = finalizedServiceIds.has(sid) ? 'realizado' : s.estatus
+          return {
+            id: sid,
+            idDependencia: s.dependencia_id,
+            folio: s.folio,
+            asunto: s.asunto,
+            descripcion: s.descripcion || '',
+            categoria: s.categoria || '',
+            estatus: serviceStatusLabel(rawStatus),
+            prioridad: priorityLabel(s.prioridad),
+            fechaAsignacion: stripUtcSuffix(s.fecha_asignacion || s.created_at || ''),
+            fechaVencimiento: stripUtcSuffix(s.fecha_vencimiento || ''),
+            asignadoA: '',
+            solicitante: s.solicitante || '',
+            cargo: s.cargo || '',
+          }
+        })
+      }
+
+      if (Array.isArray(eList)) {
+        realEncuestas.value = eList.map((e: any) => ({
+          idReporte: e.reporte_id ?? e.idReporte,
+          calificacion: Number(e.calificacion ?? e.promedio ?? 10),
+        }))
+      }
+
+      hasLoadedRealData.value = true
+    } catch {
+      /* fallback */
+    }
+  }
+  onMounted(loadRealOperationalData)
+
+  const baseReports = computed(() =>
+    hasLoadedRealData.value ? realReports.value : mockReportes
+  )
+  const baseTickets = computed(() =>
+    hasLoadedRealData.value ? realTickets.value : mockTickets
+  )
+  const baseServices = computed(() =>
+    hasLoadedRealData.value ? realServices.value : mockServices
+  )
+  const baseEncuestas = computed(() =>
+    hasLoadedRealData.value ? realEncuestas.value : mockEncuestas
+  )
+
   const myOriginalReports = computed(() =>
-    mockReportes.filter(
-      (r: Reporte) => r.idDependencia === myCompanyId.value && checkDateFilter(r.fechaElaboracion)
+    baseReports.value.filter(
+      (r: Reporte) =>
+        (r.idDependencia === undefined ||
+          myCompanyId.value === -1 ||
+          r.idDependencia === myCompanyId.value) &&
+        checkDateFilter(r.fechaElaboracion)
     )
   )
-  // Note: Tickets y Servicios also filtered by date. Some dashboards keep base tickets un-time-filtered, but here we sync them.
   const myOriginalTickets = computed(() =>
-    mockTickets.filter(
-      (t: Ticket) => t.idDependencia === myCompanyId.value && checkDateFilter(t.fechaSolicitud)
+    baseTickets.value.filter(
+      (t: Ticket) =>
+        (t.idDependencia === undefined ||
+          myCompanyId.value === -1 ||
+          t.idDependencia === myCompanyId.value) &&
+        (checkDateFilter(t.fechaSolicitud) ||
+          myOriginalReports.value.some(
+            r => r.tipoReporte === 'Ticket' && Number(r.origenDatosId) === Number(t.id)
+          ))
     )
   )
   const myOriginalServices = computed(() =>
-    mockServices.filter(
-      (s: Service) => s.idDependencia === myCompanyId.value && checkDateFilter(s.fechaAsignacion)
+    baseServices.value.filter(
+      (s: Service) =>
+        (s.idDependencia === undefined ||
+          myCompanyId.value === -1 ||
+          s.idDependencia === myCompanyId.value) &&
+        (checkDateFilter(s.fechaAsignacion || s.fechaVencimiento) ||
+          myOriginalReports.value.some(
+            r =>
+              r.tipoReporte === 'Servicio Programado' && Number(r.origenDatosId) === Number(s.id)
+          ))
     )
   )
 
@@ -709,7 +917,7 @@
       return myOriginalReports.value.some(
         r =>
           r.tipoReporte === 'Ticket' &&
-          r.origenDatosId === t.id &&
+          Number(r.origenDatosId) === Number(t.id) &&
           r.ejecutoresIds.includes(selectedTechnician.value as number)
       )
     })
@@ -721,55 +929,67 @@
       return myOriginalReports.value.some(
         r =>
           r.tipoReporte === 'Servicio Programado' &&
-          r.origenDatosId === s.id &&
+          Number(r.origenDatosId) === Number(s.id) &&
           r.ejecutoresIds.includes(selectedTechnician.value as number)
       )
     })
   })
 
   const totalReportes = computed(() => {
-    const c = analyticsData.value?.conteo
-    if (c && c.cantidad_reportes_generados !== undefined)
-      return Number(c.cantidad_reportes_generados) || 0
+    if (!hasLoadedRealData.value && timeFilter.value === 'Histórico') {
+      const c = analyticsData.value?.conteo
+      if (c && c.cantidad_reportes_generados !== undefined)
+        return Number(c.cantidad_reportes_generados) || 0
+    }
     return myReports.value.length
   })
 
   // 4. KPI Calculations (Volumes)
   const totalTicketsReportes = computed(() => {
-    const v = analyticsData.value?.volumen
-    if (Array.isArray(v) && v.length) {
-      return v.find((x: any) => x.tipo === 'ticket')?.total || 0
+    if (!hasLoadedRealData.value && timeFilter.value === 'Histórico') {
+      const v = analyticsData.value?.volumen
+      if (Array.isArray(v) && v.length) {
+        return v.find((x: any) => x.tipo === 'ticket')?.total || 0
+      }
     }
     return myReports.value.filter(r => r.tipoReporte === 'Ticket').length
   })
   const totalServiciosReportes = computed(() => {
-    const v = analyticsData.value?.volumen
-    if (Array.isArray(v) && v.length) {
-      return v.find((x: any) => x.tipo === 'servicio')?.total || 0
+    if (!hasLoadedRealData.value && timeFilter.value === 'Histórico') {
+      const v = analyticsData.value?.volumen
+      if (Array.isArray(v) && v.length) {
+        return v.find((x: any) => x.tipo === 'servicio')?.total || 0
+      }
     }
     return myReports.value.filter(r => r.tipoReporte === 'Servicio Programado').length
   })
   const totalLibresReportes = computed(() => {
-    const v = analyticsData.value?.volumen
-    if (Array.isArray(v) && v.length) {
-      return v.find((x: any) => x.tipo === 'libre')?.total || 0
+    if (!hasLoadedRealData.value && timeFilter.value === 'Histórico') {
+      const v = analyticsData.value?.volumen
+      if (Array.isArray(v) && v.length) {
+        return v.find((x: any) => x.tipo === 'libre')?.total || 0
+      }
     }
     return myReports.value.filter(r => r.tipoReporte === 'Libre').length
   })
 
-  // totalHoras: Sum diff between fechaHoraInicio and fechaHoraFin across 'Cerrado / Trabajo Finalizado' reports
+  // totalHoras: Sum diff between fechaHoraInicio and fechaHoraFin across reports
   const totalHoras = computed(() => {
-    if (analyticsData.value?.horas_hombre?.horas)
+    if (
+      !hasLoadedRealData.value &&
+      timeFilter.value === 'Histórico' &&
+      analyticsData.value?.horas_hombre?.horas
+    )
       return parseFloat(analyticsData.value.horas_hombre.horas) || 0
     let hl = 0
     myReports.value.forEach((report: Reporte) => {
       if (
-        report.estatusReporte === 'Cerrado / Trabajo Finalizado' &&
+        report.estatusReporte !== 'Descartado / Cancelado' &&
         report.fechaHoraInicio &&
         report.fechaHoraFin
       ) {
-        const start = new Date(report.fechaHoraInicio).getTime()
-        const end = new Date(report.fechaHoraFin).getTime()
+        const start = parseLocalDate(report.fechaHoraInicio)?.getTime() ?? NaN
+        const end = parseLocalDate(report.fechaHoraFin)?.getTime() ?? NaN
         if (!isNaN(start) && !isNaN(end) && end > start) {
           const duration = (end - start) / (1000 * 60 * 60)
           hl += duration * (report.ejecutoresIds?.length || 1)
@@ -781,14 +1001,18 @@
 
   // Times
   const mttrAvg = computed(() => {
-    if (analyticsData.value?.mttr?.mttr_horas)
+    if (
+      !hasLoadedRealData.value &&
+      timeFilter.value === 'Histórico' &&
+      analyticsData.value?.mttr?.mttr_horas
+    )
       return parseFloat(analyticsData.value.mttr.mttr_horas) || 0
     let totalHrs = 0
     let count = 0
     myReports.value.forEach(r => {
       if (r.categoria === 'Mantenimiento Correctivo' && r.fechaHoraInicio && r.fechaHoraFin) {
-        const start = new Date(r.fechaHoraInicio).getTime()
-        const end = new Date(r.fechaHoraFin).getTime()
+        const start = parseLocalDate(r.fechaHoraInicio)?.getTime() ?? NaN
+        const end = parseLocalDate(r.fechaHoraFin)?.getTime() ?? NaN
         if (!isNaN(start) && !isNaN(end) && end > start) {
           totalHrs += (end - start) / (1000 * 60 * 60)
           count++
@@ -807,8 +1031,8 @@
         r.fechaHoraInicio &&
         r.fechaHoraFin
       ) {
-        const start = new Date(r.fechaHoraInicio).getTime()
-        const end = new Date(r.fechaHoraFin).getTime()
+        const start = parseLocalDate(r.fechaHoraInicio)?.getTime() ?? NaN
+        const end = parseLocalDate(r.fechaHoraFin)?.getTime() ?? NaN
         if (!isNaN(start) && !isNaN(end) && end > start) {
           totalHrs += (end - start) / (1000 * 60 * 60)
           count++
@@ -819,41 +1043,19 @@
   })
 
   // Distribution Counts
-  const countPreventive = computed(() => {
-    if (analyticsData.value?.categoria) {
-      const c = analyticsData.value.categoria.find((x: any) => x.categoria === 'preventivo')
-      return c ? parseInt(c.total) : 0
-    }
-    return myReports.value.filter(r => r.categoria === 'Mantenimiento Preventivo').length
-  })
-  const countCorrective = computed(() => {
-    if (analyticsData.value?.categoria) {
-      const c = analyticsData.value.categoria.find((x: any) => x.categoria === 'correctivo')
-      return c ? parseInt(c.total) : 0
-    }
-    return myReports.value.filter(r => r.categoria === 'Mantenimiento Correctivo').length
-  })
-  const countDiagnostico = computed(() => {
-    if (analyticsData.value?.categoria) {
-      const c = analyticsData.value.categoria.find((x: any) => x.categoria === 'diagnostico')
-      return c ? parseInt(c.total) : 0
-    }
-    return myReports.value.filter(r => r.categoria === 'Diagnóstico').length
-  })
-  const countInstalacion = computed(() => {
-    if (analyticsData.value?.categoria) {
-      const c = analyticsData.value.categoria.find((x: any) => x.categoria === 'instalacion')
-      return c ? parseInt(c.total) : 0
-    }
-    return myReports.value.filter(r => r.categoria === 'Instalación').length
-  })
-  const countMejora = computed(() => {
-    if (analyticsData.value?.categoria) {
-      const c = analyticsData.value.categoria.find((x: any) => x.categoria === 'mejora')
-      return c ? parseInt(c.total) : 0
-    }
-    return myReports.value.filter(r => r.categoria === 'Mejora').length
-  })
+  const countPreventive = computed(
+    () => myReports.value.filter(r => r.categoria === 'Mantenimiento Preventivo').length
+  )
+  const countCorrective = computed(
+    () => myReports.value.filter(r => r.categoria === 'Mantenimiento Correctivo').length
+  )
+  const countDiagnostico = computed(
+    () => myReports.value.filter(r => r.categoria === 'Diagnóstico').length
+  )
+  const countInstalacion = computed(
+    () => myReports.value.filter(r => r.categoria === 'Instalación').length
+  )
+  const countMejora = computed(() => myReports.value.filter(r => r.categoria === 'Mejora').length)
 
   // Percentages
   const percentPreventive = computed(() => {
@@ -891,28 +1093,35 @@
     }
 
     myTickets.value.forEach(ticket => {
-      if (ticket.estatus === 'Resuelto' || ticket.estatus === 'Cerrado') {
+      const reports = myReports.value.filter(
+        r => r.tipoReporte === 'Ticket' && Number(r.origenDatosId) === Number(ticket.id)
+      )
+      const hasFinalizedReport = reports.some(
+        r => r.estatusReporte === 'Cerrado / Trabajo Finalizado'
+      )
+
+      if (ticket.estatus === 'Resuelto' || ticket.estatus === 'Cerrado' || hasFinalizedReport) {
         totalResolved++
 
         // For resolution time, we use the last report's finish time or ticket.fechaAtencion
-        const reports = myReports.value.filter(
-          r => r.tipoReporte === 'Ticket' && r.origenDatosId === ticket.id
-        )
         let resolutionTimestamp = 0
 
         if (reports.length > 0) {
           const sortedReports = [...reports].sort(
-            (a, b) => new Date(b.fechaHoraFin).getTime() - new Date(a.fechaHoraFin).getTime()
+            (a, b) =>
+              (parseLocalDate(b.fechaHoraFin || b.fechaElaboracion)?.getTime() ?? 0) -
+              (parseLocalDate(a.fechaHoraFin || a.fechaElaboracion)?.getTime() ?? 0)
           )
           const lastReport = sortedReports[0]
           if (lastReport) {
-            resolutionTimestamp = new Date(lastReport.fechaHoraFin).getTime()
+            resolutionTimestamp =
+              parseLocalDate(lastReport.fechaHoraFin || lastReport.fechaElaboracion)?.getTime() ?? 0
           }
         } else if (ticket.fechaAtencion) {
-          resolutionTimestamp = new Date(ticket.fechaAtencion).getTime()
+          resolutionTimestamp = parseLocalDate(ticket.fechaAtencion)?.getTime() ?? 0
         }
 
-        const requestTimestamp = new Date(ticket.fechaSolicitud).getTime()
+        const requestTimestamp = parseLocalDate(ticket.fechaSolicitud)?.getTime() ?? 0
 
         if (resolutionTimestamp && requestTimestamp) {
           const diffHours = (resolutionTimestamp - requestTimestamp) / (1000 * 60 * 60)
@@ -921,6 +1130,8 @@
           if (diffHours <= maxWindow) {
             insideSLA++
           }
+        } else {
+          insideSLA++
         }
       }
     })
@@ -934,6 +1145,8 @@
 
   const slaPercentage = computed(() => {
     if (
+      !hasLoadedRealData.value &&
+      timeFilter.value === 'Histórico' &&
       analyticsData.value?.sla &&
       Array.isArray(analyticsData.value.sla) &&
       analyticsData.value.sla.length
@@ -953,11 +1166,15 @@
     let totalResolved = 0
 
     myTickets.value.forEach(ticket => {
-      if (ticket.estatus === 'Resuelto' || ticket.estatus === 'Cerrado') {
+      const reports = myReports.value.filter(
+        r => r.tipoReporte === 'Ticket' && Number(r.origenDatosId) === Number(ticket.id)
+      )
+      const hasFinalizedReport = reports.some(
+        r => r.estatusReporte === 'Cerrado / Trabajo Finalizado'
+      )
+
+      if (ticket.estatus === 'Resuelto' || ticket.estatus === 'Cerrado' || hasFinalizedReport) {
         totalResolved++
-        const reports = myReports.value.filter(
-          r => r.tipoReporte === 'Ticket' && r.origenDatosId === ticket.id
-        )
         if (reports.length === 1) {
           firstTimeFixes++
         }
@@ -975,8 +1192,8 @@
     let count = 0
     myReports.value.forEach(r => {
       if (r.horaSalidaBase && r.horaRegresoABase) {
-        const start = new Date(r.horaSalidaBase).getTime()
-        const end = new Date(r.horaRegresoABase).getTime()
+        const start = parseLocalDate(r.horaSalidaBase)?.getTime() ?? NaN
+        const end = parseLocalDate(r.horaRegresoABase)?.getTime() ?? NaN
         if (!isNaN(start) && !isNaN(end) && end > start) {
           totalHrs += (end - start) / (1000 * 60 * 60)
           count++
@@ -992,8 +1209,8 @@
     let count = 0
     myReports.value.forEach(r => {
       if (r.categoria === 'Diagnóstico' && r.fechaHoraInicio && r.fechaHoraFin) {
-        const start = new Date(r.fechaHoraInicio).getTime()
-        const end = new Date(r.fechaHoraFin).getTime()
+        const start = parseLocalDate(r.fechaHoraInicio)?.getTime() ?? NaN
+        const end = parseLocalDate(r.fechaHoraFin)?.getTime() ?? NaN
         if (!isNaN(start) && !isNaN(end) && end > start) {
           totalHrs += (end - start) / (1000 * 60 * 60)
           count++
@@ -1015,22 +1232,20 @@
 
   // 4. % de Retrabajos (Only on Tickets / Servicios Programados)
   const percentRework = computed(() => {
-    if (
-      analyticsData.value?.retrabajos?.pct_retrabajo !== null &&
-      analyticsData.value?.retrabajos?.pct_retrabajo !== undefined
-    ) {
-      return Math.round(parseFloat(analyticsData.value.retrabajos.pct_retrabajo) || 0)
-    }
     const requestedWork = myReports.value.filter(
       r => r.tipoReporte === 'Ticket' || r.tipoReporte === 'Servicio Programado'
     )
     if (requestedWork.length === 0) return null
     const originCounts = new Map<string, number>()
     requestedWork.forEach(r => {
-      const key = `${r.tipoReporte}-${r.origenDatosId}`
-      originCounts.set(key, (originCounts.get(key) || 0) + 1)
+      if (r.origenDatosId) {
+        const key = `${r.tipoReporte}-${r.origenDatosId}`
+        originCounts.set(key, (originCounts.get(key) || 0) + 1)
+      }
     })
     const reworkCount = requestedWork.filter(r => {
+      if (r.esRetrabajo) return true
+      if (!r.origenDatosId) return false
       const key = `${r.tipoReporte}-${r.origenDatosId}`
       return (originCounts.get(key) || 0) >= 2
     }).length
@@ -1048,7 +1263,7 @@
 
   // 6. % de OT Cerradas de Conformidad (encuesta calificacion >= 8 / closed reports WITH survey)
   const percentConformity = computed(() => {
-    const closedReportsWithSurvey = mockEncuestas.filter(e =>
+    const closedReportsWithSurvey = baseEncuestas.value.filter(e =>
       myReports.value.some(
         r => r.idReporte === e.idReporte && r.estatusReporte === 'Cerrado / Trabajo Finalizado'
       )
@@ -1063,31 +1278,17 @@
   const technicianHoursMap = computed(() => {
     const map = new Map<number, number>()
 
-    // Datos reales de la API (vista vw_horas_por_tecnico)
-    const apiHoras = analyticsData.value?.horas_por_tecnico
-    if (Array.isArray(apiHoras) && apiHoras.length) {
-      apiHoras.forEach((r: any) => {
-        const id = Number(r.usuario_id)
-        const horas = parseFloat(r.horas || 0)
-        if (selectedTechnician.value === null || id === selectedTechnician.value) {
-          map.set(id, (map.get(id) || 0) + horas)
-        }
-      })
-      return map
-    }
-
     myReports.value.forEach((report: Reporte) => {
       if (
-        report.estatusReporte === 'Cerrado / Trabajo Finalizado' &&
+        report.estatusReporte !== 'Descartado / Cancelado' &&
         report.fechaHoraInicio &&
         report.fechaHoraFin
       ) {
-        const start = new Date(report.fechaHoraInicio).getTime()
-        const end = new Date(report.fechaHoraFin).getTime()
+        const start = parseLocalDate(report.fechaHoraInicio)?.getTime() ?? NaN
+        const end = parseLocalDate(report.fechaHoraFin)?.getTime() ?? NaN
         if (!isNaN(start) && !isNaN(end) && end > start) {
           const diffHours = (end - start) / (1000 * 60 * 60)
 
-          // Add hours to each executor proportionally or total (we do total per executor here)
           report.ejecutoresIds.forEach((id: number) => {
             if (selectedTechnician.value === null || id === selectedTechnician.value) {
               map.set(id, (map.get(id) || 0) + diffHours)
@@ -1122,28 +1323,15 @@
     const reactiveData: number[] = []
     const now = new Date()
 
-    // Datos reales de la API (vista vw_proactivo_reactivo)
-    const pr = analyticsData.value?.proactivo_reactivo
-    if (
-      pr !== null &&
-      pr !== undefined &&
-      (pr.proactivo !== undefined || pr.reactivo !== undefined)
-    ) {
-      const label = timeFilter.value === 'Histórico' ? 'Todo' : timeFilter.value
-      labels.push(label)
-      proactiveData.push(parseInt(pr.proactivo || 0, 10))
-      reactiveData.push(parseInt(pr.reactivo || 0, 10))
-      return { labels, proactiveData, reactiveData }
-    }
-
     switch (timeFilter.value) {
       case 'Hoy': {
         for (let h = 0; h <= 23; h++) {
           labels.push(`${h.toString().padStart(2, '0')}:00`)
           const proCount = myServices.value.filter(s => {
             if (!s.fechaAsignacion) return false
-            const d = new Date(s.fechaAsignacion)
+            const d = parseLocalDate(s.fechaAsignacion)
             return (
+              !!d &&
               d.getFullYear() === now.getFullYear() &&
               d.getMonth() === now.getMonth() &&
               d.getDate() === now.getDate() &&
@@ -1152,8 +1340,9 @@
           }).length
           const reactCount = myTickets.value.filter(t => {
             if (!t.fechaSolicitud) return false
-            const d = new Date(t.fechaSolicitud)
+            const d = parseLocalDate(t.fechaSolicitud)
             return (
+              !!d &&
               d.getFullYear() === now.getFullYear() &&
               d.getMonth() === now.getMonth() &&
               d.getDate() === now.getDate() &&

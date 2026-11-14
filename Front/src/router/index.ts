@@ -88,11 +88,12 @@ const router = createRouter({
       meta: { legal: 'legal-notice' },
     },
 
-    // Cualquier ruta no definida → 404 personalizada
+    // Portal público de autoservicio de tickets para clientes por empresa
     {
-      path: '/:pathMatch(.*)*',
-      name: 'not-found',
-      component: () => import('../views/NotFoundView.vue'),
+      path: '/solicitar/:slug',
+      name: 'public-ticket-create',
+      component: () => import('../views/public/PublicTicketCreateView.vue'),
+      meta: { requiresAuth: false },
     },
 
     {
@@ -117,7 +118,7 @@ const router = createRouter({
           path: 'company-profile',
           name: 'company-profile',
           component: () => import('../views/admin/CompanyProfileView.vue'),
-          meta: { allowedRoles: [2] },
+          meta: { allowedRoles: [1, 2] },
         },
 
         {
@@ -190,9 +191,16 @@ const router = createRouter({
           path: 'evaluacion-servicio/:id',
           name: 'report-survey',
           component: () => import('../views/admin/reports/ReportSurveyView.vue'),
-          meta: { allowedRoles: [1, 2, 3] },
+          meta: { allowedRoles: [0, 1, 2] },
         },
       ],
+    },
+
+    // Cualquier ruta no definida → 404 personalizada (al final de todas las rutas)
+    {
+      path: '/:pathMatch(.*)*',
+      name: 'not-found',
+      component: () => import('../views/NotFoundView.vue'),
     },
   ],
 })

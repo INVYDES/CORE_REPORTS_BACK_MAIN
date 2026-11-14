@@ -3,18 +3,103 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Area;
+use App\Models\Equipo;
+use App\Models\Servicio;
 use App\Models\Usuario;
-use App\Traits\EnsuresDependencia;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class ServicioController extends Controller
 {
-    use EnsuresDependencia;
+    private function authUser(Request $request): Usuario
+    {
+        $user = $request->user() ?? auth()->user();
+        if (! $user instanceof Usuario) {
+            abort(401, 'No autenticado.');
+        }
+
+        return $user;
+    }
+
+    private function ensureOwnDependencia(Request $request, Model $model): void
+    {
+        if ((int) $model->getAttribute('dependencia_id') !== (int) $this->authUser($request)->dependencia_id) {
+            abort(403, 'El recurso no pertenece a tu dependencia.');
+        }
+    }
+
+    private function resolveFk(Request $request, string $field, string $modelClass): ?int
+    {
+        $id = $request->input($field);
+        if ($id === null || $id === '') {
+            return null;
+        }
+
+        $depId = $this->authUser($request)->dependencia_id;
+        $found = $modelClass::withoutGlobalScopes()
+            ->where('dependencia_id', $depId)
+            ->find((int) $id);
+
+        if ($found === null) {
+            return null;
+        }
+
+        return (int) $found->getKey();
+    }
+
+    private function generarFolioSecuencial(int $dependenciaId): string
+    {
+        $prefijo = 'SRV-'.now('America/Mexico_City')->format('Ymd');
+
+        $ultimo = Servicio::withoutGlobalScopes()
+            ->where('dependencia_id', $dependenciaId)
+            ->where('folio', 'like', $prefijo.'-%')
+            ->orderByDesc('folio')
+            ->value('folio');
+
+        $secuencia = $ultimo ? ((int) substr((string) $ultimo, -4)) + 1 : 1;
+
+        return sprintf('%s-%04d', $prefijo, $secuencia);
+    }
+
+    private function sincronizarServiciosConReportesFinalizados(int $depId): void
+    {
+        try {
+            $ahora = now('America/Mexico_City')->format('Y-m-d H:i:s');
+            DB::table('servicios')
+                ->where('dependencia_id', $depId)
+                ->whereIn('estatus', ['programado', 'en_proceso', 'vencido'])
+                ->whereExists(function ($sub) {
+                    $sub->select(DB::raw(1))
+                        ->from('reportes')
+                        ->whereColumn('reportes.servicio_id', 'servicios.id')
+                        ->where('reportes.estatus', 'finalizado')
+                        ->whereNull('reportes.deleted_at');
+                })
+                ->update([
+                    'estatus' => 'realizado',
+                    'updated_at' => $ahora,
+                ]);
+        } catch (\Throwable $e) {
+            report($e);
+        }
+    }
 
     public function index(Request $request): JsonResponse
     {
-        $q = \App\Models\Servicio::with(['asignado', 'area', 'equipo']);
+        $user = $request->user() ?? auth()->user();
+        if ($user && isset($user->dependencia_id)) {
+            $this->sincronizarServiciosConReportesFinalizados((int) $user->dependencia_id);
+        }
+
+        $q = Servicio::with(['asignado', 'area', 'equipo']);
+
+        if ($user && (int) $user->rol === 3) {
+            $q->where('usuario_asignado_id', $user->id);
+        }
 
         if ($request->filled('estatus')) {
             $q->where('estatus', $request->string('estatus'));
@@ -37,10 +122,14 @@ class ServicioController extends Controller
 
     public function store(Request $request): JsonResponse
     {
-        $this->authorize('create', \App\Models\Servicio::class);
+        $this->authorize('create', Servicio::class);
+
+        if ($request->filled('prioridad')) {
+            $request->merge(['prioridad' => strtolower((string) $request->input('prioridad'))]);
+        }
 
         $data = $request->validate([
-            'folio' => 'sometimes|string|max:50',
+            'folio' => 'sometimes|nullable|string|max:50',
             'asunto' => 'required|string|max:200',
             'descripcion' => 'nullable|string',
             'categoria' => 'nullable|in:preventivo,correctivo,instalacion,mejora,diagnostico',
@@ -54,32 +143,53 @@ class ServicioController extends Controller
             'equipo_id' => 'nullable|integer',
         ]);
 
-        $data['usuario_asignado_id'] = $this->validatedDependenciaId($request, 'usuario_asignado_id', Usuario::class);
-        $data['area_id'] = $this->validatedDependenciaId($request, 'area_id', \App\Models\Area::class);
-        $data['equipo_id'] = $this->validatedDependenciaId($request, 'equipo_id', \App\Models\Equipo::class);
+        $user = $this->authUser($request);
+        $depId = (int) $user->dependencia_id;
 
+        $data['dependencia_id'] = $depId;
+        $data['usuario_asignado_id'] = $this->resolveFk($request, 'usuario_asignado_id', Usuario::class);
+        $data['area_id'] = $this->resolveFk($request, 'area_id', Area::class);
+        $data['equipo_id'] = $this->resolveFk($request, 'equipo_id', Equipo::class);
         $data['estatus'] = $data['estatus'] ?? 'programado';
 
-        // Folio correlativo y alta en la misma transacción (ver GeneraFolio).
-        $servicio = \App\Models\Servicio::createConFolio($data, $this->usuario($request)->dependencia_id);
+        $servicio = DB::transaction(function () use ($data, $depId) {
+            $folioActual = trim((string) ($data['folio'] ?? ''));
+            if ($folioActual === '' || preg_match('/^SRV-\d{6}$/', $folioActual)) {
+                $data['folio'] = $this->generarFolioSecuencial($depId);
+            }
+
+            $srv = new Servicio;
+            $srv->forceFill($data);
+            $srv->save();
+
+            return $srv;
+        });
 
         return response()->json($servicio->load(['asignado', 'area', 'equipo']), 201);
     }
 
-    public function show(\App\Models\Servicio $servicio): JsonResponse
+    public function show(Request $request, Servicio $servicio): JsonResponse
     {
-        $this->ensureOwnDependencia($servicio);
+        $this->ensureOwnDependencia($request, $servicio);
+        $this->sincronizarServiciosConReportesFinalizados((int) $servicio->dependencia_id);
+        $servicio->refresh();
 
         return response()->json($servicio->load(['asignado', 'area', 'equipo', 'historial', 'reportes']));
     }
 
-    public function update(Request $request, \App\Models\Servicio $servicio): JsonResponse
+    public function update(Request $request, Servicio $servicio): JsonResponse
     {
         $this->authorize('update', $servicio);
+
+        if ($request->filled('prioridad')) {
+            $request->merge(['prioridad' => strtolower((string) $request->input('prioridad'))]);
+        }
 
         $data = $request->validate([
             'asunto' => 'sometimes|string|max:200',
             'descripcion' => 'sometimes|nullable|string',
+            'solicitante' => 'sometimes|nullable|string|max:150',
+            'cargo' => 'sometimes|nullable|string|max:150',
             'categoria' => 'sometimes|in:preventivo,correctivo,instalacion,mejora,diagnostico',
             'fecha_asignacion' => 'sometimes|nullable|date',
             'fecha_vencimiento' => 'sometimes|nullable|date',
@@ -91,21 +201,21 @@ class ServicioController extends Controller
         ]);
 
         if (array_key_exists('usuario_asignado_id', $data)) {
-            $data['usuario_asignado_id'] = $this->validatedDependenciaId($request, 'usuario_asignado_id', Usuario::class);
+            $data['usuario_asignado_id'] = $this->resolveFk($request, 'usuario_asignado_id', Usuario::class);
         }
         if (array_key_exists('area_id', $data)) {
-            $data['area_id'] = $this->validatedDependenciaId($request, 'area_id', \App\Models\Area::class);
+            $data['area_id'] = $this->resolveFk($request, 'area_id', Area::class);
         }
         if (array_key_exists('equipo_id', $data)) {
-            $data['equipo_id'] = $this->validatedDependenciaId($request, 'equipo_id', \App\Models\Equipo::class);
+            $data['equipo_id'] = $this->resolveFk($request, 'equipo_id', Equipo::class);
         }
 
-        $servicio->update($data);
+        $servicio->forceFill($data)->save();
 
         return response()->json($servicio->load(['asignado', 'area', 'equipo']));
     }
 
-    public function destroy(\App\Models\Servicio $servicio): JsonResponse
+    public function destroy(Servicio $servicio): JsonResponse
     {
         $this->authorize('delete', $servicio);
         $servicio->delete();

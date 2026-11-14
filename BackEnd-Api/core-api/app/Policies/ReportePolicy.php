@@ -28,12 +28,9 @@ class ReportePolicy
         if ($reporte->dependencia_id !== $user->dependencia_id) {
             return false;
         }
-        // Tecnico solo si es ejecutor o creador
-        if ($user->rol === RolUsuario::Tecnico->value) {
-            return $reporte->creado_por === $user->id || $reporte->ejecutores()->where('usuario_id', $user->id)->exists();
-        }
 
-        return in_array($user->rol, [RolUsuario::AdminTec->value, RolUsuario::AdminCom->value], true);
+        // Solo el usuario que creó el reporte puede editarlo
+        return (int) $reporte->creado_por === (int) $user->id;
     }
 
     public function delete(Usuario $user, Reporte $reporte): bool

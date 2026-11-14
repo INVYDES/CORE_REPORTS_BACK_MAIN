@@ -31,7 +31,11 @@
     markRead,
     markAllRead,
     clearNew,
-  } = useNotificacionesRealtime()
+  } = useNotificacionesRealtime({
+    usuarioId: () => currentUser.value?.id,
+    userEmail: () => currentUser.value?.email,
+    userRole: () => currentUser.value?.rol,
+  })
 
   const toggleDropdown = () => {
     showDropdown.value = !showDropdown.value
