@@ -8,7 +8,9 @@ use App\Models\Usuario;
 use App\Services\UploadStorageService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -338,9 +340,23 @@ class EmpresaController extends Controller
             }
 
             $empresa->logo = $path;
-            $empresa->logo_ruta = $ruta;
-            $empresa->logo_disco = $disco;
-            $empresa->save();
+            try {
+                if (Schema::hasColumn('dependencias', 'logo_ruta')) {
+                    $empresa->logo_ruta = $ruta;
+                }
+                if (Schema::hasColumn('dependencias', 'logo_disco')) {
+                    $empresa->logo_disco = $disco;
+                }
+                $empresa->save();
+            } catch (\Throwable) {
+                DB::table('dependencias')
+                    ->where('id', $empresa->id)
+                    ->update([
+                        'logo' => $path,
+                        'updated_at' => now(),
+                    ]);
+                $empresa->refresh();
+            }
 
             return response()->json([
                 'success' => true,
