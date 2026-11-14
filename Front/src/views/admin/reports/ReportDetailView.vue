@@ -231,11 +231,48 @@
 
   const splitParagraphs = (raw?: string | null): string[] => {
     if (!raw) return []
-    const parts = String(raw)
-      .split(/\r?\n+/)
-      .map(p => p.trim())
-      .filter(Boolean)
-    return parts.length > 0 ? parts : [String(raw).trim()]
+    const lines = String(raw)
+      .split(/\r?\n/)
+      .map(l => l.trim())
+
+    const paragraphs: string[] = []
+    let current = ''
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]
+      if (!line) {
+        if (current) {
+          paragraphs.push(current)
+          current = ''
+        }
+        continue
+      }
+
+      if (!current) {
+        current = line
+        continue
+      }
+
+      // Si el renglón anterior no termina en signo de cierre (. : ; ! ?)
+      // y el siguiente empieza con minúscula (texto copiado de PDF partido a mitad de oración),
+      // unirlo al mismo párrafo con un espacio.
+      const prevEndsSentence = /[.!?:;]$/.test(current)
+      const nextStartsLower = /^[a-záéíóúñü]/.test(line)
+      const nextIsBullet = /^([-•*]|\d+[.)]|[A-Z]:\s)/.test(line)
+
+      if (!prevEndsSentence && nextStartsLower && !nextIsBullet) {
+        current += ' ' + line
+      } else {
+        paragraphs.push(current)
+        current = line
+      }
+    }
+
+    if (current) {
+      paragraphs.push(current)
+    }
+
+    return paragraphs.length > 0 ? paragraphs : [String(raw).trim()]
   }
 
   // -- Full Edit Modal Logic (#13) --
@@ -577,12 +614,12 @@
     const formatParagraphsHtml = (text?: string | null, fallback = 'Sin información.') => {
       const list = splitParagraphs(text)
       if (list.length === 0) {
-        return `<p class="pdf-item" style="font-family:Arial,sans-serif;font-size:8.5pt;line-height:1.35;color:#000000;margin:0 0 5px 0;text-align:justify;">${esc(fallback)}</p>`
+        return `<p class="pdf-item" style="font-family:Arial,sans-serif;font-size:9pt;line-height:1.38;color:#000000;margin:0 0 8px 0;text-align:justify;">${esc(fallback)}</p>`
       }
       return list
         .map(
           p =>
-            `<p class="pdf-item" style="font-family:Arial,sans-serif;font-size:8.5pt;line-height:1.35;color:#000000;margin:0 0 5px 0;text-align:justify;text-justify:inter-word;">${esc(p)}</p>`
+            `<p class="pdf-item" style="font-family:Arial,sans-serif;font-size:9pt;line-height:1.38;color:#000000;margin:0 0 9px 0;text-align:justify;text-justify:inter-word;">${esc(p)}</p>`
         )
         .join('')
     }
@@ -713,7 +750,7 @@
         <strong style="font-weight:bold;">Puesto:</strong> ${esc(tecPuesto)}
       </td>
       <td style="padding:2px 0 2px 8px;vertical-align:top;color:#000000;">
-        <strong style="font-weight:bold;">Area:</strong> ${esc(origArea)}
+        <strong style="font-weight:bold;">Área:</strong> ${esc(origArea)}
       </td>
     </tr>
     <tr>
@@ -721,7 +758,7 @@
         <strong style="font-weight:bold;">No. Empleado:</strong> ${esc(tecNum)}
       </td>
       <td style="padding:2px 0 2px 8px;vertical-align:top;color:#000000;">
-        <strong style="font-weight:bold;">Responsable de Area:</strong> ${esc(origRespArea)}
+        <strong style="font-weight:bold;">Responsable de Área:</strong> ${esc(origRespArea)}
       </td>
     </tr>
     <tr>
@@ -798,25 +835,22 @@
   ${evidsHtml}
 
   <!-- FIRMAS -->
-  <div class="pdf-item signatures-block" style="margin-top:24px;page-break-inside:avoid;break-inside:avoid;">
+  <div class="pdf-item signatures-block" style="margin-top:26px;page-break-inside:avoid;break-inside:avoid;">
     <table style="width:100%;border-collapse:collapse;">
       <tr>
         <td style="width:44%;vertical-align:bottom;">
-          <div style="font-family:Arial,sans-serif;font-size:9pt;font-weight:bold;margin-bottom:24px;color:#000000;">Reviso:</div>
+          <div style="font-family:Arial,sans-serif;font-size:9pt;font-weight:bold;margin-bottom:40px;color:#000000;">Revisó:</div>
           <div style="border-top:1px solid #000000;width:100%;"></div>
           <div style="font-family:Arial,sans-serif;text-align:center;font-size:8pt;font-weight:bold;letter-spacing:0.5px;margin-top:4px;color:#000000;">NOMBRE Y FIRMA</div>
         </td>
         <td style="width:12%;"></td>
         <td style="width:44%;vertical-align:bottom;">
-          <div style="font-family:Arial,sans-serif;font-size:9pt;font-weight:bold;margin-bottom:24px;color:#000000;">Elaboro:</div>
+          <div style="font-family:Arial,sans-serif;font-size:9pt;font-weight:bold;margin-bottom:40px;color:#000000;">Elaboró:</div>
           <div style="border-top:1px solid #000000;width:100%;"></div>
           <div style="font-family:Arial,sans-serif;text-align:center;font-size:8pt;font-weight:bold;letter-spacing:0.5px;margin-top:4px;color:#000000;">NOMBRE Y FIRMA</div>
         </td>
       </tr>
     </table>
-    <div style="font-family:Arial,sans-serif;text-align:center;font-size:7.5pt;font-style:italic;color:#64748b;margin-top:14px;">
-      Generado con CoreReports para ${esc(companyName.value)}
-    </div>
   </div>
 </div>`
   }
@@ -2162,11 +2196,11 @@
           </tr>
           <tr>
             <td><strong>Puesto:</strong> {{ tecnicoPuesto }}</td>
-            <td><strong>Area:</strong> {{ areaName }}</td>
+            <td><strong>Área:</strong> {{ areaName }}</td>
           </tr>
           <tr>
             <td><strong>No. Empleado:</strong> {{ tecnicoNumero }}</td>
-            <td><strong>Responsable de Area:</strong> {{ displayResponsableNombre }}</td>
+            <td><strong>Responsable de Área:</strong> {{ displayResponsableNombre }}</td>
           </tr>
           <tr>
             <td><strong>Fecha:</strong> {{ formatDateShort(report.fechaElaboracion) }}</td>
