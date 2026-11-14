@@ -19,6 +19,7 @@
   const router = useRouter()
   const toast = useToast()
   const tickets = ref<Ticket[]>([])
+  const users = ref<any[]>([])
   const showTicketModal = ref(false)
 
   const statusLabel = (code: string) =>
@@ -27,12 +28,53 @@
         abierto: 'Abierto',
         en_proceso: 'En Proceso',
         resuelto: 'Resuelto',
-        cerrado: 'Cerrado',
+        cerrado: 'Resuelto',
       }) as any
     )[code] || code
   const priorityLabel = (code: string) =>
     (({ alta: 'Alta', media: 'Media', baja: 'Baja' }) as any)[code] || code
   const fmtShort = (iso?: string | null) => (iso ? String(iso).replace('T', ' ').slice(0, 16) : '')
+
+  const loadUsers = async () => {
+    try {
+      const res = await client.get('/tecnicos').then(r => r.data)
+      const list = res.data || res
+      if (Array.isArray(list)) {
+        users.value = list
+      }
+    } catch {
+      // Silencioso: se complementa con los usuarios presentes en los tickets
+    }
+  }
+
+  const availableUsers = computed(() => {
+    const depId =
+      (currentUser.value as any)?.dependencia_id ?? (currentUser.value as any)?.idDependencia
+    const map = new Map<string, string>()
+
+    users.value.forEach((u: any) => {
+      const uDep = u.dependencia_id ?? u.idDependencia
+      if (depId && uDep && Number(uDep) !== Number(depId)) return
+      const id = String(u.id ?? u.idUsuario ?? '')
+      const fullName = `${u.nombre || ''} ${u.apellidos || ''}`.trim()
+      if (id && fullName) {
+        map.set(id, fullName)
+      }
+    })
+
+    tickets.value.forEach((t: any) => {
+      if (depId && t.idDependencia !== undefined && Number(t.idDependencia) !== Number(depId))
+        return
+      if (t.usuarioAsignadoId && t.atendio) {
+        const id = String(t.usuarioAsignadoId)
+        if (!map.has(id)) {
+          map.set(id, t.atendio)
+        }
+      }
+    })
+
+    return Array.from(map.entries()).map(([id, nombre]) => ({ id, nombre }))
+  })
 
   const fetchTickets = async () => {
     try {
@@ -75,6 +117,7 @@
   }
   onMounted(() => {
     fetchTickets()
+    loadUsers()
     window.addEventListener('core-reports:ticket-created', fetchTickets)
   })
   onUnmounted(() => {
@@ -85,6 +128,7 @@
   const searchQuery = ref('')
   const statusFilter = ref('')
   const priorityFilter = ref('')
+  const userFilter = ref('')
   const dateFilter = ref('')
 
   // Filter by enterprise and search criteria
@@ -110,15 +154,21 @@
       const q = searchQuery.value.toLowerCase()
       const matchesSearch =
         searchQuery.value === '' ||
+        (ticket.folio || '').toLowerCase().includes(q) ||
         (ticket.asunto || '').toLowerCase().includes(q) ||
         (ticket.descripcion || '').toLowerCase().includes(q)
       const matchesStatus = statusFilter.value === '' || ticket.estatus === statusFilter.value
       const matchesPriority =
         priorityFilter.value === '' || ticket.prioridad === priorityFilter.value
+      const matchesUser =
+        userFilter.value === '' ||
+        (userFilter.value === 'sin_asignar'
+          ? !(ticket as any).usuarioAsignadoId && !ticket.atendio
+          : String((ticket as any).usuarioAsignadoId) === String(userFilter.value))
       const matchesDate =
         dateFilter.value === '' || (ticket.fechaSolicitud || '').slice(0, 10) === dateFilter.value
 
-      return matchesSearch && matchesStatus && matchesPriority && matchesDate
+      return matchesSearch && matchesStatus && matchesPriority && matchesUser && matchesDate
     })
   })
 
@@ -128,6 +178,7 @@
       searchQuery.value !== '' ||
       statusFilter.value !== '' ||
       priorityFilter.value !== '' ||
+      userFilter.value !== '' ||
       dateFilter.value !== ''
     )
   })
@@ -137,6 +188,7 @@
     searchQuery.value = ''
     statusFilter.value = ''
     priorityFilter.value = ''
+    userFilter.value = ''
     dateFilter.value = ''
   }
 
@@ -234,7 +286,6 @@
             <option value="Abierto">Abierto</option>
             <option value="En Proceso">En Proceso</option>
             <option value="Resuelto">Resuelto</option>
-            <option value="Cerrado">Cerrado</option>
           </select>
         </div>
 
@@ -245,6 +296,17 @@
             <option value="Alta">Alta (!!!)</option>
             <option value="Media">Media (!!)</option>
             <option value="Baja">Baja (!)</option>
+          </select>
+        </div>
+
+        <div class="filter-item" v-if="currentUser?.rol !== 3">
+          <Filter :size="16" class="icon" />
+          <select v-model="userFilter">
+            <option value="">Todos los Usuarios</option>
+            <option value="sin_asignar">Sin asignar</option>
+            <option v-for="u in availableUsers" :key="u.id" :value="String(u.id)">
+              {{ u.nombre }}
+            </option>
           </select>
         </div>
 
