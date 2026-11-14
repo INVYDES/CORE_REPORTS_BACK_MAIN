@@ -571,6 +571,9 @@
                   @change="onLogoSelected"
                 />
               </div>
+              <p class="mt-2.5 text-xs text-slate-400 leading-relaxed text-center px-1">
+                <strong class="text-slate-500 font-medium">Recomendado:</strong> 2560 × 1015 px (proporción horizontal 2.5:1) en PNG o JPG sin bordes vacíos para ajuste óptimo en PDF.
+              </p>
             </div>
           </div>
         </div>
