@@ -12,7 +12,7 @@ class LicenciaService
 {
     /**
      * Resuelve una licencia por id; si no hay registros en DB usa el
-     * catálogo de respaldo. Nunca devuelve null para ids 1..3.
+     * cat�logo de respaldo. Nunca devuelve null para ids 1..7.
      */
     public function resolverLicencia(int $licenciaId): ?Licencia
     {
@@ -103,9 +103,13 @@ class LicenciaService
     public function catalogoFallback(): array
     {
         return [
-            1 => $this->licenciaFallback(1, 'Trial', 'trial', 0, null, 7, 10, 100, '7 días gratis para probar'),
-            2 => $this->licenciaFallback(2, 'Mensual', 'mensual', 399, null, 0, 10, 100, 'Plan mensual - $399 MXN'),
-            3 => $this->licenciaFallback(3, 'Anual', 'anual', 399, 3830.40, 0, 10, 100, 'Plan anual - $3830.40 (20% descuento)'),
+            1 => $this->licenciaFallback(1, 'Gratis', 'trial', 0, null, 7, 2, 999999, 'Prueba gratuita de 7 d�as para 2 usuarios'),
+            2 => $this->licenciaFallback(2, '5 usuarios - Mensual', 'mensual', 399, null, 0, 5, 999999, '5 usuarios - $399 MXN al mes'),
+            3 => $this->licenciaFallback(3, '5 usuarios - Anual', 'anual', 399, 3990, 0, 5, 999999, '5 usuarios - $3,990 MXN al a�o'),
+            4 => $this->licenciaFallback(4, '10 usuarios - Mensual', 'mensual', 699, null, 0, 10, 999999, '10 usuarios - $699 MXN al mes'),
+            5 => $this->licenciaFallback(5, '10 usuarios - Anual', 'anual', 699, 6990, 0, 10, 999999, '10 usuarios - $6,990 MXN al a�o'),
+            6 => $this->licenciaFallback(6, '30 usuarios - Mensual', 'mensual', 1999, null, 0, 30, 999999, '30 usuarios - $1,999 MXN al mes'),
+            7 => $this->licenciaFallback(7, '30 usuarios - Anual', 'anual', 1999, 19990, 0, 30, 999999, '30 usuarios - $19,990 MXN al a�o'),
         ];
     }
 

@@ -73,12 +73,21 @@ class ReporteController extends Controller
         }
 
         $depId = $this->authUser($request)->dependencia_id;
+        $solicitados = array_values(array_unique(array_map('intval', $ids)));
 
-        return Usuario::where('dependencia_id', $depId)
-            ->whereIn('id', array_map('intval', $ids))
+        $encontrados = Usuario::where('dependencia_id', $depId)
+            ->whereIn('id', $solicitados)
             ->pluck('id')
             ->map(fn ($id) => (int) $id)
             ->all();
+
+        if (count($encontrados) !== count($solicitados)) {
+            throw ValidationException::withMessages([
+                'ejecutores' => 'Uno o más ejecutores no pertenecen a tu dependencia.',
+            ]);
+        }
+
+        return $encontrados;
     }
 
     private function generarFolioSecuencial(int $dependenciaId): string
@@ -330,7 +339,38 @@ class ReporteController extends Controller
             'materiales.*.cantidad' => 'required_with:materiales|numeric|min:0.01',
             'evidencias' => 'sometimes|array|max:20',
             'evidencias.*' => 'file|mimes:jpg,jpeg,png,gif,webp,pdf,csv,xls,xlsx|max:10240',
-            'evidenciaFotografica' => 'sometimes|array|max:20',
+            'evidenciaFotografica' => [
+                'sometimes',
+                'array',
+                'max:20',
+                function (string $attribute, mixed $value, \Closure $fail): void {
+                    foreach ((array) $value as $item) {
+                        $url = is_array($item) ? ($item['url'] ?? null) : $item;
+                        $url = is_string($url) ? trim($url) : '';
+
+                        if ($url === '') {
+                            $fail('La evidencia fotográfica no es válida.');
+
+                            return;
+                        }
+
+                        if (preg_match('/^data:/i', $url)) {
+                            if (! preg_match('#^data:image/(jpeg|jpg|png|gif|webp);base64,[A-Za-z0-9+/=\s]+$#i', $url)) {
+                                $fail('La evidencia debe ser una imagen válida (JPEG, PNG, GIF o WEBP).');
+                            }
+
+                            continue;
+                        }
+
+                        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+                        if (! filter_var($url, FILTER_VALIDATE_URL) || ! in_array($scheme, ['http', 'https'], true)) {
+                            $fail('La evidencia debe ser una URL válida o una imagen en base64.');
+
+                            return;
+                        }
+                    }
+                },
+            ],
         ]);
 
         $user = $this->authUser($request);
@@ -369,12 +409,23 @@ class ReporteController extends Controller
             }
         }
 
+        $depId = (int) $user->dependencia_id;
         $materiales = collect((array) $request->input('materiales', []))
-            ->map(fn ($m) => [
-                'material' => MaterialCatalogo::find((int) ($m['material_id'] ?? 0)),
-                'cantidad' => (float) ($m['cantidad'] ?? 1),
-            ])
-            ->filter(fn ($m) => $m['material'] !== null)
+            ->map(function ($m) use ($depId) {
+                $materialId = (int) ($m['material_id'] ?? 0);
+                $material = MaterialCatalogo::where('dependencia_id', $depId)->find($materialId);
+
+                if ($material === null) {
+                    throw ValidationException::withMessages([
+                        'materiales' => "El material {$materialId} no pertenece a tu dependencia.",
+                    ]);
+                }
+
+                return [
+                    'material' => $material,
+                    'cantidad' => (float) ($m['cantidad'] ?? 1),
+                ];
+            })
             ->values();
 
         $archivos = (array) $request->file('evidencias', []);
@@ -416,18 +467,14 @@ class ReporteController extends Controller
                     'cantidad' => $m['cantidad'],
                     'costo_unitario' => $m['material']->costo_unitario,
                 ]);
-                try {
-                    $inv->registrarSalida(
-                        $reporte->dependencia_id,
-                        $m['material']->id,
-                        $m['cantidad'],
-                        'reporte',
-                        $reporte->id,
-                        $user->id
-                    );
-                } catch (\Throwable $e) {
-                    report($e);
-                }
+                $inv->registrarSalida(
+                    $reporte->dependencia_id,
+                    $m['material']->id,
+                    $m['cantidad'],
+                    'reporte',
+                    $reporte->id,
+                    $user->id
+                );
             }
 
             $carpetaEvidencias = 'evidencias/'.$reporte->dependencia_id;

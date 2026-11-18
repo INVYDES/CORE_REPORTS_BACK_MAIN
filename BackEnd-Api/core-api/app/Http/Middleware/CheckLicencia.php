@@ -14,6 +14,10 @@ class CheckLicencia
     {
         $user = $request->user();
 
+        if ($user instanceof Usuario && $user->isSuperAdmin()) {
+            return $next($request);
+        }
+
         if ($user instanceof Usuario && $user->dependencia instanceof Dependencia) {
             $dep = $user->dependencia;
 

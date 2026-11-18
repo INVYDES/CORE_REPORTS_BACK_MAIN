@@ -110,6 +110,9 @@ class ServicioController extends Controller
         if ($request->filled('prioridad')) {
             $q->where('prioridad', $request->string('prioridad'));
         }
+        if ($request->filled('area_id')) {
+            $q->where('area_id', (int) $request->get('area_id'));
+        }
         if ($request->filled('search')) {
             $s = $request->string('search');
             $q->where(fn ($qq) => $qq

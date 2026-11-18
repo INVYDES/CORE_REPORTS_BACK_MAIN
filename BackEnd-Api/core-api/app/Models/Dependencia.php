@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
@@ -20,6 +21,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property string|null $telefono
  * @property string|null $datos_facturacion
  * @property bool $activa
+ * @property bool $es_plataforma
  * @property string|null $logo
  * @property string|null $logo_ruta
  * @property string|null $logo_disco
@@ -36,7 +38,7 @@ class Dependencia extends Model
     protected $fillable = [
         'nombre', 'rfc', 'tipo_licencia', 'fecha_expiracion',
         'limite_usuarios', 'limite_reportes_mensuales',
-        'correo_contacto', 'correo_reportes', 'telefono', 'datos_facturacion', 'activa', 'logo',
+        'correo_contacto', 'correo_reportes', 'telefono', 'datos_facturacion', 'activa', 'es_plataforma', 'logo',
         'logo_ruta', 'logo_disco', 'trial_usado_at',
     ];
 
@@ -44,6 +46,7 @@ class Dependencia extends Model
         'fecha_expiracion' => 'date',
         'trial_usado_at' => 'datetime',
         'activa' => 'boolean',
+        'es_plataforma' => 'boolean',
         'limite_usuarios' => 'integer',
         'limite_reportes_mensuales' => 'integer',
     ];
@@ -67,6 +70,12 @@ class Dependencia extends Model
     public function usuarios(): HasMany
     {
         return $this->hasMany(Usuario::class, 'dependencia_id');
+    }
+
+    /** @return HasOne<Suscripcion, $this> */
+    public function suscripcion(): HasOne
+    {
+        return $this->hasOne(Suscripcion::class, 'dependencia_id');
     }
 
     /** @return HasMany<Area, $this> */

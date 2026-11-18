@@ -4,11 +4,12 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Dependencia;
-use App\Models\Suscripcion;
+use App\Models\PagoLicencia;
 use App\Services\LicenciaService;
 use App\Support\PagoReferencia;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use MercadoPago\Client\Payment\PaymentClient;
 use MercadoPago\Client\Preference\PreferenceClient;
@@ -98,7 +99,8 @@ class LicenciaController extends Controller
         }
 
         try {
-            $frontendUrl = rtrim((string) config('app.frontend_url'), '/');
+            $frontendUrl = rtrim((string) (config('services.frontend.url') ?: config('app.url')), '/');
+            $referencia = 'CS-'.$licencia->id.'-'.$dependencia->id;
 
             $preference = (new PreferenceClient)->create([
                 'items' => [[
@@ -119,7 +121,7 @@ class LicenciaController extends Controller
                     'pending' => $frontendUrl.'/licencias/pendiente',
                 ],
                 'auto_return' => 'approved',
-                'external_reference' => 'CS-'.$licencia->id.'-'.$dependencia->id,
+                'external_reference' => $referencia,
                 'notification_url' => rtrim(config('app.url'), '/').'/api/v1/mercadopago/licencia-webhook',
                 'statement_descriptor' => 'CsRecords',
                 'metadata' => [
@@ -129,10 +131,16 @@ class LicenciaController extends Controller
                 ],
             ]);
 
-            Suscripcion::updateOrCreate(
-                ['dependencia_id' => $dependencia->id],
-                ['mercadopago_preference_id' => $preference->id]
-            );
+            PagoLicencia::create([
+                'dependencia_id' => $dependencia->id,
+                'licencia_id' => $licencia->exists ? $licencia->id : null,
+                'preferencia_id' => $preference->id,
+                'external_reference' => $referencia,
+                'estado' => 'pendiente',
+                'metodo' => 'mercadopago',
+                'monto' => $precio,
+                'moneda' => 'MXN',
+            ]);
 
             return response()->json([
                 'success' => true,
@@ -147,25 +155,19 @@ class LicenciaController extends Controller
         }
     }
 
-    /**
-     * Webhook de Mercado Pago.
-     * Seguridad: verifica la firma x-signature según la doc oficial de MP
-     * cuando está configurado el secret; ignora referencias desconocidas.
-     */
     public function webhookMercadoPago(Request $request): JsonResponse
     {
         try {
-            // 1) Verificación de firma (HMAC SHA256 sobre id;x-request-id;dataId)
             $secret = config('services.mercadopago.webhook_secret');
             if ($secret && ! $this->firmaValida($request, $secret)) {
                 Log::warning('Webhook MP con firma inválida', ['ip' => $request->ip()]);
 
-                return response()->json(['status' => 'ok'], 200); // no filtrar el motivo
+                return response()->json(['status' => 'ok'], 200);
             }
 
             $payload = $request->all();
-            $tipo = $payload['type'] ?? $payload['topic'] ?? null;
-            $paymentId = $payload['data']['id'] ?? null;
+            $tipo = $payload['type'] ?? $payload['topic'] ?? $request->query('type') ?? $request->query('topic');
+            $paymentId = $payload['data']['id'] ?? $request->query('data.id') ?? $request->query('id');
 
             if ($tipo !== 'payment' || empty($paymentId)) {
                 return response()->json(['status' => 'ok'], 200);
@@ -173,56 +175,21 @@ class LicenciaController extends Controller
 
             $payment = (new PaymentClient)->get((int) $paymentId);
 
-            if ($payment->status !== 'approved') {
-                return response()->json(['status' => 'ok'], 200);
+            if ($payment->status === 'approved') {
+                $this->procesarPagoAprobado($payment, (string) $paymentId);
+            } else {
+                PagoLicencia::where('payment_id', (string) $paymentId)
+                    ->update(['estado' => in_array($payment->status, ['rejected', 'cancelled'], true) ? $payment->status : 'pendiente']);
             }
-
-            $referencia = PagoReferencia::parsear($payment->external_reference ?? null);
-
-            if ($referencia === null) {
-                Log::warning('Referencia MP desconocida', ['ref' => $payment->external_reference ?? '']);
-
-                return response()->json(['status' => 'ok'], 200);
-            }
-
-            $dependencia = Dependencia::find($referencia['dependencia']);
-            if (! $dependencia) {
-                Log::error('Webhook MP: dependencia inexistente', ['id' => $referencia['dependencia']]);
-
-                return response()->json(['status' => 'ok'], 200);
-            }
-
-            // Idempotencia: si ya procesamos ese pago, no volver a activar
-            $existente = Suscripcion::where('dependencia_id', $dependencia->id)->first();
-            if ($existente && $existente->mercadopago_payment_id == $paymentId && $existente->estado === 'activa') {
-                return response()->json(['status' => 'ok'], 200);
-            }
-
-            $licencia = $this->licencias->resolverLicencia($referencia['licencia']);
-            if ($licencia === null) {
-                Log::error('Webhook MP: licencia inexistente', ['id' => $referencia['licencia']]);
-
-                return response()->json(['status' => 'ok'], 200);
-            }
-
-            $this->licencias->activarLicencia(
-                $dependencia,
-                $licencia,
-                'mercadopago',
-                (float) ($payment->transaction_amount ?? 0),
-                (string) $paymentId
-            );
 
             return response()->json(['status' => 'ok'], 200);
         } catch (\Throwable $e) {
             Log::error('Error en webhook MP', ['error' => $e->getMessage()]);
 
-            // 200 para evitar reintentos infinitos; el error queda registrado
             return response()->json(['status' => 'ok'], 200);
         }
     }
 
-    /** Consulta del estado de un pago (polling del front al volver de MP). */
     public function verificarPagoMercadoPago(Request $request, string $paymentId): JsonResponse
     {
         try {
@@ -230,11 +197,15 @@ class LicenciaController extends Controller
 
             $payment = (new PaymentClient)->get((int) $paymentId);
 
-            // El pago debe pertenecer a la dependencia del usuario: evita que
-            // una empresa consulte pagos de otra con solo conocer el id.
             if (! PagoReferencia::perteneceA($payment->external_reference ?? null, $dependenciaId)) {
                 return response()->json(['success' => false, 'message' => 'Pago no encontrado'], 404);
             }
+
+            if ($payment->status === 'approved') {
+                $this->procesarPagoAprobado($payment, (string) $paymentId);
+            }
+
+            $dependencia = Dependencia::find($dependenciaId);
 
             return response()->json([
                 'success' => true,
@@ -245,6 +216,11 @@ class LicenciaController extends Controller
                     'amount' => $payment->transaction_amount,
                     'approved' => $payment->status === 'approved',
                     'external_reference' => $payment->external_reference ?? null,
+                    'licencia' => $dependencia ? [
+                        'tipo_licencia' => $dependencia->tipo_licencia,
+                        'fecha_expiracion' => $dependencia->fecha_expiracion?->format('Y-m-d'),
+                        'activa' => $dependencia->activa,
+                    ] : null,
                 ],
             ]);
         } catch (\Throwable $e) {
@@ -254,23 +230,102 @@ class LicenciaController extends Controller
         }
     }
 
-    /**
-     * Validación de x-signature de Mercado Pago.
-     * Manifest: "id:{dataId};" o "id:{dataId};x-request-id:{xhrId};" según versión.
-     */
+    private function procesarPagoAprobado(object $payment, string $paymentId): void
+    {
+        $referencia = PagoReferencia::parsear($payment->external_reference ?? null);
+
+        if ($referencia === null) {
+            Log::warning('Referencia MP desconocida', ['ref' => $payment->external_reference ?? '']);
+
+            return;
+        }
+
+        $dependencia = Dependencia::find($referencia['dependencia']);
+        $licencia = $this->licencias->resolverLicencia($referencia['licencia']);
+
+        if (! $dependencia || ! $licencia) {
+            Log::error('Webhook MP: referencia inexistente', $referencia);
+
+            return;
+        }
+
+        $pago = PagoLicencia::firstOrNew(['payment_id' => $paymentId]);
+
+        if ($pago->exists && $pago->procesado_en !== null) {
+            return;
+        }
+
+        if (! $pago->exists) {
+            $pendiente = PagoLicencia::where('external_reference', (string) $payment->external_reference)
+                ->whereNull('payment_id')
+                ->latest()
+                ->first();
+
+            if ($pendiente) {
+                $pago = $pendiente;
+                $pago->payment_id = $paymentId;
+            }
+        }
+
+        $pago->fill([
+            'dependencia_id' => $dependencia->id,
+            'licencia_id' => $licencia->exists ? $licencia->id : $pago->licencia_id,
+            'external_reference' => (string) $payment->external_reference,
+            'estado' => 'aprobado',
+            'metodo' => 'mercadopago',
+            'monto' => (float) ($payment->transaction_amount ?? 0),
+            'moneda' => 'MXN',
+            'pagado_en' => now(),
+        ])->save();
+
+        DB::transaction(function () use ($pago, $dependencia, $licencia, $payment, $paymentId) {
+            $bloqueado = PagoLicencia::whereKey($pago->id)->lockForUpdate()->first();
+
+            if (! $bloqueado || $bloqueado->procesado_en !== null) {
+                return;
+            }
+
+            $this->licencias->activarLicencia(
+                $dependencia,
+                $licencia,
+                'mercadopago',
+                (float) ($payment->transaction_amount ?? 0),
+                $paymentId
+            );
+
+            $bloqueado->procesado_en = now();
+            $bloqueado->save();
+        });
+    }
+
     private function firmaValida(Request $request, string $secret): bool
     {
-        $signature = $request->header('x-signature');
-        $dataId = (string) ($request->query('data.id') ?? $request->input('data.id', ''));
-        $requestId = (string) $request->header('x-request-id', '');
+        $signature = (string) $request->header('x-signature', '');
 
-        if (! $signature || $dataId === '') {
+        if ($signature === '') {
             return false;
         }
 
-        $manifest = "id:{$dataId};request-id:{$requestId};";
+        $partes = [];
+        foreach (explode(',', $signature) as $parte) {
+            $segmento = explode('=', trim($parte), 2);
+            if (count($segmento) === 2) {
+                $partes[$segmento[0]] = $segmento[1];
+            }
+        }
+
+        $ts = $partes['ts'] ?? '';
+        $v1 = $partes['v1'] ?? '';
+        $dataId = (string) ($request->query('data.id') ?? $request->input('data.id', ''));
+        $requestId = (string) $request->header('x-request-id', '');
+
+        if ($ts === '' || $v1 === '' || $dataId === '') {
+            return false;
+        }
+
+        $manifest = "id:{$dataId};request-id:{$requestId};ts:{$ts};";
         $esperada = hash_hmac('sha256', $manifest, $secret);
 
-        return hash_equals($esperada, strtolower(explode(',', $signature)[0]));
+        return hash_equals($esperada, strtolower($v1));
     }
 }

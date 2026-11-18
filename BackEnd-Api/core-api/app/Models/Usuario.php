@@ -44,6 +44,8 @@ class Usuario extends Authenticatable
 
     public const ROLE_TECNICO = 3;
 
+    public const ROLE_SUPER_ADMIN = 4;
+
     protected $table = 'usuarios';
 
     protected $fillable = [
@@ -110,6 +112,11 @@ class Usuario extends Authenticatable
     public function isCliente(): bool
     {
         return $this->rol === RolUsuario::Cliente->value;
+    }
+
+    public function isSuperAdmin(): bool
+    {
+        return $this->rol === RolUsuario::SuperAdmin->value;
     }
 
     /**

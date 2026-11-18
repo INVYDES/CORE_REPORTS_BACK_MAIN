@@ -15,7 +15,22 @@ class LoginRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'email' => 'required|string',
+            'email' => [
+                'required',
+                'string',
+                'max:150',
+                function (string $attribute, mixed $value, \Closure $fail): void {
+                    $identifier = trim((string) $value);
+
+                    $isEmail = filter_var($identifier, FILTER_VALIDATE_EMAIL) !== false;
+                    $isEmployeeId = preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]{1,49}$/', $identifier) === 1
+                        && preg_match('/\d/', $identifier) === 1;
+
+                    if (! $isEmail && ! $isEmployeeId) {
+                        $fail('Ingresa un correo electrónico válido o un ID de empleado válido.');
+                    }
+                },
+            ],
             'password' => 'required|string',
         ];
     }

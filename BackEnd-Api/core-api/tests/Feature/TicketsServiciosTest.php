@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Area;
 use App\Models\Dependencia;
 use App\Models\Servicio;
 use App\Models\ServicioHistorial;
@@ -333,5 +334,33 @@ class TicketsServiciosTest extends TestCase
             'tipo' => 'servicio_realizado',
             'estatus' => 'pendiente',
         ]);
+    }
+
+    public function test_listar_servicios_filtra_por_area(): void
+    {
+        $dep = $this->dependencia();
+        $admin = $this->usuario($dep, 1, 'admin@operaciones.com');
+
+        $areaUno = Area::create([
+            'dependencia_id' => $dep->id,
+            'codigo' => 'A1',
+            'nombre' => 'Área uno',
+            'activa' => true,
+        ]);
+        $areaDos = Area::create([
+            'dependencia_id' => $dep->id,
+            'codigo' => 'A2',
+            'nombre' => 'Área dos',
+            'activa' => true,
+        ]);
+
+        $servicioUno = $this->crearServicio($admin, ['area_id' => $areaUno->id]);
+        $this->crearServicio($admin, ['asunto' => 'Otro servicio', 'area_id' => $areaDos->id]);
+
+        $this->actingAs($admin, 'sanctum')
+            ->getJson('/api/v1/servicios?area_id='.$areaUno->id)
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $servicioUno['id']);
     }
 }

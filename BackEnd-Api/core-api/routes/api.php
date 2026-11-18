@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\HistoryController;
 use App\Http\Controllers\Api\LicenciaController;
 use App\Http\Controllers\Api\MaterialController;
 use App\Http\Controllers\Api\NotificacionController;
+use App\Http\Controllers\Api\PlataformaController;
 use App\Http\Controllers\Api\PublicTicketController;
 use App\Http\Controllers\Api\ReporteController;
 use App\Http\Controllers\Api\ServicioController;
@@ -49,11 +50,29 @@ Route::prefix('v1')->group(function () {
         ->middleware('signed')
         ->name('evidencias.documento');
 
-    // API autenticada
-    Route::middleware(['auth:sanctum', 'dependencia', 'licencia'])->group(function () {
+    // API autenticada sin bloqueo de licencia: permite renovar y cerrar sesión
+    Route::middleware(['auth:sanctum', 'dependencia'])->group(function () {
         Route::get('/me', [AuthController::class, 'me']);
         Route::post('/logout', [AuthController::class, 'logout']);
+        Route::post('licencias/{licencia}/comprar-mercadopago', [LicenciaController::class, 'comprarLicenciaMercadoPago']);
+        Route::get('licencias/verificar-pago/{paymentId}', [LicenciaController::class, 'verificarPagoMercadoPago']);
+    });
 
+    // Panel de plataforma: solo SUPER_ADMIN
+    Route::middleware(['auth:sanctum', 'superadmin'])->prefix('plataforma')->group(function () {
+        Route::get('resumen', [PlataformaController::class, 'resumen']);
+        Route::get('dependencias', [PlataformaController::class, 'index']);
+        Route::get('dependencias/{dependencia}', [PlataformaController::class, 'show']);
+        Route::patch('dependencias/{dependencia}/licencia', [PlataformaController::class, 'updateLicencia']);
+        Route::patch('dependencias/{dependencia}/estado', [PlataformaController::class, 'toggleActiva']);
+        Route::delete('dependencias/{dependencia}', [PlataformaController::class, 'destroy']);
+        Route::get('pagos', [PlataformaController::class, 'pagos']);
+        Route::get('licencias', [PlataformaController::class, 'catalogo']);
+        Route::put('licencias/{licencia}', [PlataformaController::class, 'updateCatalogo']);
+    });
+
+    // API autenticada con licencia vigente
+    Route::middleware(['auth:sanctum', 'dependencia', 'licencia'])->group(function () {
         Route::apiResource('dependencias', DependenciaController::class)->only(['index', 'show', 'update']);
         Route::get('empresa', [EmpresaController::class, 'show']);
         Route::put('empresa', [EmpresaController::class, 'update']);
@@ -77,8 +96,6 @@ Route::prefix('v1')->group(function () {
         Route::get('materiales/{material}/movimientos', [MaterialController::class, 'movimientos']);
         Route::apiResource('encuestas', EncuestaController::class)->only(['index', 'store', 'show']);
         Route::get('encuestas/reporte/{idReporte}', [EncuestaController::class, 'porReporte']);
-        Route::post('licencias/{licencia}/comprar-mercadopago', [LicenciaController::class, 'comprarLicenciaMercadoPago']);
-        Route::get('licencias/verificar-pago/{paymentId}', [LicenciaController::class, 'verificarPagoMercadoPago']);
 
         Route::get('history', [HistoryController::class, 'index']);
         Route::apiResource('notificaciones', NotificacionController::class)->only(['index', 'store']);

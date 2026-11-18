@@ -13,4 +13,10 @@ return [
         'url' => env('FRONTEND_URL', 'http://localhost:5173'),
     ],
 
+    // ── Cuenta de plataforma (Seeder) ────────────────────────────────────
+    'super_admin' => [
+        'email' => env('SUPER_ADMIN_EMAIL'),
+        'password' => env('SUPER_ADMIN_PASSWORD'),
+    ],
+
 ];

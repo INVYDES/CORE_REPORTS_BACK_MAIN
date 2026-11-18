@@ -18,6 +18,7 @@ class CoreReportsSeeder extends Seeder
             ['id' => 1, 'nombre' => 'Administrador Técnico', 'codigo' => 'admin_tecnico', 'descripcion' => 'Supervisa operaciones y aprueba reportes'],
             ['id' => 2, 'nombre' => 'Administrador Comercial', 'codigo' => 'admin_comercial', 'descripcion' => 'Gestiona licencias y KPIs'],
             ['id' => 3, 'nombre' => 'Técnico', 'codigo' => 'tecnico', 'descripcion' => 'Ejecuta trabajos y genera reportes'],
+            ['id' => 4, 'nombre' => 'Super Admin', 'codigo' => 'super_admin', 'descripcion' => 'Administra clientes y licencias de la plataforma'],
         ];
         foreach ($roles as $r) {
             Role::firstOrCreate(['id' => $r['id']], $r);

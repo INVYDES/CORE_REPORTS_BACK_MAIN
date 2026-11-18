@@ -8,6 +8,7 @@ enum RolUsuario: int
     case AdminTec = 1;
     case AdminCom = 2;
     case Tecnico = 3;
+    case SuperAdmin = 4;
 
     public function label(): string
     {
@@ -16,6 +17,7 @@ enum RolUsuario: int
             self::AdminTec => 'AdminTec',
             self::AdminCom => 'AdminCom',
             self::Tecnico => 'Tecnico',
+            self::SuperAdmin => 'SuperAdmin',
         };
     }
 
@@ -27,6 +29,11 @@ enum RolUsuario: int
     public function isAdmin(): bool
     {
         return in_array($this, [self::AdminTec, self::AdminCom], true);
+    }
+
+    public function isSuperAdmin(): bool
+    {
+        return $this === self::SuperAdmin;
     }
 
     public function isTecnicoLike(): bool

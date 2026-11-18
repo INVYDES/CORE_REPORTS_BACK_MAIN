@@ -306,6 +306,7 @@ class TicketController extends Controller
 
             return response()->json([
                 'ok' => true,
+                'success' => true,
                 'data' => $tecnicos,
             ]);
         } catch (\Throwable $e) {
@@ -313,6 +314,7 @@ class TicketController extends Controller
 
             return response()->json([
                 'ok' => false,
+                'success' => false,
                 'message' => 'Error al obtener técnicos: ' . $e->getMessage(),
             ], 500);
         }
