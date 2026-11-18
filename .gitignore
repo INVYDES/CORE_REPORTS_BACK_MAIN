@@ -30,6 +30,9 @@ Thumbs.db
 *.swp
 *.swo
 
+# Repositorios separados
+/Front/
+
 # Duplicates / backups
 Front/core-reports-master/
 **/*.bak
