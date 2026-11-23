@@ -18,7 +18,7 @@ return new class extends Migration
                 $table->integer('max_reportes_mensuales')->default(100);
                 $table->decimal('precio', 10, 2)->default(0);
                 $table->decimal('precio_anual', 10, 2)->nullable();
-                $table->integer('dias_prueba')->default(7);
+                $table->integer('dias_prueba')->default(0);
                 $table->text('descripcion')->nullable();
                 $table->boolean('activo')->default(true);
                 $table->string('paypal_plan_id', 100)->nullable();

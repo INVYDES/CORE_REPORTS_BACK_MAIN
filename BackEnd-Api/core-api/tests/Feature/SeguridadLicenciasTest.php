@@ -3,7 +3,9 @@
 namespace Tests\Feature;
 
 use App\Models\Dependencia;
+use App\Models\Licencia;
 use App\Models\Usuario;
+use Database\Seeders\LicenciaCatalogoSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -37,7 +39,7 @@ class SeguridadLicenciasTest extends TestCase
         ]);
     }
 
-    public function test_registro_publico_siempre_crea_un_trial(): void
+    public function test_registro_publico_crea_plan_gratuito_sin_expiracion(): void
     {
         $this->postJson('/api/v1/public/register-compania', [
             'companyName' => 'Acme Industrial',
@@ -45,42 +47,61 @@ class SeguridadLicenciasTest extends TestCase
             'password' => 'password123',
             'firstName' => 'Ana',
             'lastNamePaternal' => 'Pérez',
-            // Un cliente intenta registrarse directo con plan anual.
-            'planType' => 'annual',
-        ])->assertStatus(201);
+            'licenciaId' => 1,
+        ])
+            ->assertStatus(201)
+            ->assertJsonPath('requiere_pago', false)
+            ->assertJsonPath('licencia.codigo', 'trial');
 
         $dep = Dependencia::where('nombre', 'Acme Industrial')->firstOrFail();
 
         $this->assertSame('trial', $dep->tipo_licencia);
-        $this->assertNotNull($dep->trial_usado_at, 'El trial del registro debe quedar marcado como usado');
-        $this->assertTrue(
-            $dep->fecha_expiracion->lessThanOrEqualTo(now()->addDays(7)->endOfDay()),
-            'El registro no puede otorgar más de 7 días'
-        );
+        $this->assertNull($dep->fecha_expiracion, 'El plan gratuito no debe expirar');
+        $this->assertNull($dep->trial_usado_at, 'El plan gratuito no consume el mes de prueba');
 
         $this->assertDatabaseHas('suscripciones', [
             'dependencia_id' => $dep->id,
-            'plan' => 'trial',
+            'plan' => 'gratis',
+            'estado' => 'activa',
+            'fecha_expiracion' => null,
+        ]);
+    }
+
+    public function test_registro_publico_con_plan_pago_otorga_un_mes_gratis(): void
+    {
+        $this->seed(LicenciaCatalogoSeeder::class);
+        $licencia = Licencia::where('codigo', 'usuarios_10_mensual')->firstOrFail();
+
+        $this->postJson('/api/v1/public/register-compania', [
+            'companyName' => 'Acme Pago',
+            'email' => 'pago@acme.com',
+            'password' => 'password123',
+            'firstName' => 'Ana',
+            'lastNamePaternal' => 'Pérez',
+            'licenciaId' => $licencia->id,
+        ])
+            ->assertStatus(201)
+            ->assertJsonPath('requiere_pago', true)
+            ->assertJsonPath('licencia.codigo', 'usuarios_10_mensual');
+
+        $dep = Dependencia::where('nombre', 'Acme Pago')->firstOrFail();
+
+        $this->assertSame('mensual', $dep->tipo_licencia);
+        $this->assertSame(10, $dep->limite_usuarios);
+        $this->assertNotNull($dep->trial_usado_at, 'El mes gratis se consume al registrarse');
+        $this->assertTrue($dep->fecha_expiracion->between(now()->addDays(29), now()->addDays(31)));
+
+        $this->assertDatabaseHas('suscripciones', [
+            'dependencia_id' => $dep->id,
+            'licencia_id' => $licencia->id,
+            'plan' => 'usuarios_10_mensual',
             'estado' => 'trial',
         ]);
     }
 
-    public function test_trial_no_se_puede_reactivar(): void
+    public function test_plan_gratuito_se_puede_activar_sin_pasarela_y_no_expira(): void
     {
         $dep = $this->dependencia(['trial_usado_at' => now()->subDays(2)]);
-        $admin = $this->usuario($dep);
-
-        $this->actingAs($admin, 'sanctum')
-            ->postJson('/api/v1/licencias/1/comprar-mercadopago')
-            ->assertStatus(422)
-            ->assertJsonPath('success', false);
-
-        $this->assertSame('trial', $dep->fresh()->tipo_licencia);
-    }
-
-    public function test_trial_disponible_se_activa_sin_pasarela(): void
-    {
-        $dep = $this->dependencia();
         $admin = $this->usuario($dep);
 
         $this->actingAs($admin, 'sanctum')
@@ -88,7 +109,9 @@ class SeguridadLicenciasTest extends TestCase
             ->assertOk()
             ->assertJsonPath('pasarela', 'none');
 
-        $this->assertNotNull($dep->fresh()->trial_usado_at);
+        $dep = $dep->fresh();
+        $this->assertNull($dep->fecha_expiracion);
+        $this->assertNotNull($dep->trial_usado_at);
     }
 
     public function test_dependencia_update_requiere_rol_administrativo(): void

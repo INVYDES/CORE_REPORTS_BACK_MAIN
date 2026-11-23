@@ -114,7 +114,7 @@ class PlataformaApiTest extends TestCase
             ->assertOk()
             ->assertJsonPath('pasarela', 'none');
 
-        $this->assertTrue($cliente->fresh()->fecha_expiracion->isFuture());
+        $this->assertNull($cliente->fresh()->fecha_expiracion);
     }
 
     public function test_eliminar_cliente_desactiva_usuarios_y_revoca_tokens(): void

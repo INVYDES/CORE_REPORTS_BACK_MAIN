@@ -83,19 +83,15 @@ class LicenciaController extends Controller
             ? (float) $licencia->precio_anual
             : (float) $licencia->precio;
 
-        // Trial: activación directa sin pasarela, pero solo si la dependencia
-        // no consumió ya su periodo de prueba.
-        if ($precio == 0 || $licencia->tipo === 'trial') {
-            if (! $this->licencias->puedeActivarTrial($dependencia)) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'El periodo de prueba ya fue utilizado. Elige un plan de pago.',
-                ], 422);
-            }
+        // Plan gratuito: activación directa, sin pasarela y sin fecha de expiración.
+        if ($this->licencias->esPlanGratuito($licencia)) {
+            $this->licencias->activarLicencia($dependencia, $licencia, 'gratis', 0);
 
-            $this->licencias->activarLicencia($dependencia, $licencia, 'trial', 0);
-
-            return response()->json(['success' => true, 'message' => 'Licencia trial activada', 'pasarela' => 'none']);
+            return response()->json([
+                'success' => true,
+                'message' => 'Plan gratuito activado',
+                'pasarela' => 'none',
+            ]);
         }
 
         try {

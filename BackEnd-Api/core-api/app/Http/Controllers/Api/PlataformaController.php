@@ -283,7 +283,7 @@ class PlataformaController extends Controller
             return 'suspendida';
         }
 
-        if ($dep->tipo_licencia === 'trial') {
+        if ($dep->tipo_licencia === 'trial' && $dep->fecha_expiracion !== null) {
             return 'trial';
         }
 

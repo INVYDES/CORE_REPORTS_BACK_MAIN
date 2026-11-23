@@ -18,8 +18,8 @@ class LicenciaCatalogoSeeder extends Seeder
                 'max_reportes_mensuales' => 999999,
                 'precio' => 0,
                 'precio_anual' => null,
-                'dias_prueba' => 7,
-                'descripcion' => 'Prueba gratuita de 7 días para 2 usuarios',
+                'dias_prueba' => 0,
+                'descripcion' => 'Plan gratuito para 2 usuarios, sin fecha de expiración',
             ],
             [
                 'codigo' => 'usuarios_5_mensual',
@@ -29,8 +29,8 @@ class LicenciaCatalogoSeeder extends Seeder
                 'max_reportes_mensuales' => 999999,
                 'precio' => 399,
                 'precio_anual' => null,
-                'dias_prueba' => 0,
-                'descripcion' => '5 usuarios - $399 MXN al mes',
+                'dias_prueba' => 30,
+                'descripcion' => '5 usuarios - $399 MXN al mes · incluye 1 mes gratis',
             ],
             [
                 'codigo' => 'usuarios_5_anual',
@@ -40,8 +40,8 @@ class LicenciaCatalogoSeeder extends Seeder
                 'max_reportes_mensuales' => 999999,
                 'precio' => 399,
                 'precio_anual' => 3990,
-                'dias_prueba' => 0,
-                'descripcion' => '5 usuarios - $3,990 MXN al año',
+                'dias_prueba' => 30,
+                'descripcion' => '5 usuarios - $3,990 MXN al año · incluye 1 mes gratis',
             ],
             [
                 'codigo' => 'usuarios_10_mensual',
@@ -51,8 +51,8 @@ class LicenciaCatalogoSeeder extends Seeder
                 'max_reportes_mensuales' => 999999,
                 'precio' => 699,
                 'precio_anual' => null,
-                'dias_prueba' => 0,
-                'descripcion' => '10 usuarios - $699 MXN al mes',
+                'dias_prueba' => 30,
+                'descripcion' => '10 usuarios - $699 MXN al mes · incluye 1 mes gratis',
             ],
             [
                 'codigo' => 'usuarios_10_anual',
@@ -62,8 +62,8 @@ class LicenciaCatalogoSeeder extends Seeder
                 'max_reportes_mensuales' => 999999,
                 'precio' => 699,
                 'precio_anual' => 6990,
-                'dias_prueba' => 0,
-                'descripcion' => '10 usuarios - $6,990 MXN al año',
+                'dias_prueba' => 30,
+                'descripcion' => '10 usuarios - $6,990 MXN al año · incluye 1 mes gratis',
             ],
             [
                 'codigo' => 'usuarios_30_mensual',
@@ -73,8 +73,8 @@ class LicenciaCatalogoSeeder extends Seeder
                 'max_reportes_mensuales' => 999999,
                 'precio' => 1999,
                 'precio_anual' => null,
-                'dias_prueba' => 0,
-                'descripcion' => '30 usuarios - $1,999 MXN al mes',
+                'dias_prueba' => 30,
+                'descripcion' => '30 usuarios - $1,999 MXN al mes · incluye 1 mes gratis',
             ],
             [
                 'codigo' => 'usuarios_30_anual',
@@ -84,8 +84,8 @@ class LicenciaCatalogoSeeder extends Seeder
                 'max_reportes_mensuales' => 999999,
                 'precio' => 1999,
                 'precio_anual' => 19990,
-                'dias_prueba' => 0,
-                'descripcion' => '30 usuarios - $19,990 MXN al año',
+                'dias_prueba' => 30,
+                'descripcion' => '30 usuarios - $19,990 MXN al año · incluye 1 mes gratis',
             ],
         ];
 

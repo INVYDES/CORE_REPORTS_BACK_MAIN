@@ -5,16 +5,22 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\LoginRequest;
 use App\Models\Dependencia;
-use App\Models\Suscripcion;
+use App\Models\Licencia;
 use App\Models\Usuario;
+use App\Services\LicenciaService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password;
 
 class AuthController extends Controller
 {
+    public function __construct(private LicenciaService $licencias)
+    {
+    }
+
     public function login(LoginRequest $request): JsonResponse
     {
         $credentials = $request->validated();
@@ -73,9 +79,8 @@ class AuthController extends Controller
             'lastNamePaternal' => 'required|string|max:100',
             'lastNameMaternal' => 'nullable|string|max:100',
             'phone' => 'nullable|string|max:30',
-            // Se acepta por compatibilidad con el formulario, pero el registro
-            // público siempre crea un plan de prueba: los planes de pago solo
-            // se activan por la pasarela (Mercado Pago).
+            'licenciaId' => 'nullable|integer|min:1',
+            // Se conserva por compatibilidad con clientes anteriores.
             'planType' => 'nullable|string|max:20',
         ], [], [
             'companyName' => 'nombre de empresa',
@@ -83,38 +88,41 @@ class AuthController extends Controller
             'password' => 'contraseña',
         ]);
 
-        $dependencia = \DB::transaction(function () use ($data) {
-            $dias = 7;
-            $expiracion = now()->addDays($dias)->toDateString();
+        $licencia = $this->licencias->resolverLicencia((int) ($data['licenciaId'] ?? 1));
 
+        if (! $licencia instanceof Licencia) {
+            return response()->json([
+                'message' => 'El plan seleccionado no está disponible.',
+            ], 422);
+        }
+
+        $esGratuito = $this->licencias->esPlanGratuito($licencia);
+        $tipoDependencia = in_array($licencia->tipo, ['mensual', 'anual'], true)
+            ? $licencia->tipo
+            : 'mensual';
+        $maxUsuarios = (int) ($licencia->max_usuarios ?? 2);
+        $maxReportes = (int) ($licencia->max_reportes_mensuales ?? 999999);
+
+        $dependencia = DB::transaction(function () use ($data, $licencia, $esGratuito, $tipoDependencia, $maxUsuarios, $maxReportes) {
             $dep = Dependencia::create([
                 'nombre' => $data['companyName'],
                 'rfc' => $data['rfc'] ?? null,
-                'tipo_licencia' => 'trial',
-                'fecha_expiracion' => $expiracion,
-                'limite_usuarios' => 2,
-                'limite_reportes_mensuales' => 999999,
+                'tipo_licencia' => $esGratuito ? 'trial' : $tipoDependencia,
+                'fecha_expiracion' => null,
+                'limite_usuarios' => $maxUsuarios,
+                'limite_reportes_mensuales' => $maxReportes,
                 'correo_contacto' => $data['email'],
                 'telefono' => $data['phone'] ?? null,
                 'activa' => true,
-                // El trial del registro es el único periodo de prueba que
-                // puede consumir la dependencia.
-                'trial_usado_at' => now(),
+                // El plan gratuito no consume el mes de prueba de los planes de pago.
+                'trial_usado_at' => null,
             ]);
 
-            // Suscripción inicial: deja registrado el trial para que la
-            // licencia de prueba no pueda reactivarse indefinidamente.
-            Suscripcion::create([
-                'dependencia_id' => $dep->id,
-                'proveedor' => 'registro',
-                'plan' => 'trial',
-                'estado' => 'trial',
-                'limite_usuarios' => 2,
-                'limite_reportes_mensuales' => 999999,
-                'fecha_inicio' => now()->toDateString(),
-                'fecha_expiracion' => $expiracion,
-                'renovacion_automatica' => false,
-            ]);
+            if ($esGratuito) {
+                $this->licencias->activarLicencia($dep, $licencia, 'registro', 0);
+            } else {
+                $this->licencias->iniciarPruebaLicencia($dep, $licencia, 'registro');
+            }
 
             $user = Usuario::create([
                 'dependencia_id' => $dep->id,
@@ -142,7 +150,25 @@ class AuthController extends Controller
             'dependencia' => $dependencia,
             'user' => $user->load('dependencia'),
             'token' => $token,
+            'requiere_pago' => ! $esGratuito,
+            'licencia' => $this->formatearLicencia($licencia),
         ], 201);
+    }
+
+    private function formatearLicencia(Licencia $licencia): array
+    {
+        return [
+            'id' => $licencia->id,
+            'nombre' => $licencia->nombre,
+            'codigo' => $licencia->codigo,
+            'tipo' => $licencia->tipo,
+            'max_usuarios' => (int) $licencia->max_usuarios,
+            'max_reportes_mensuales' => (int) $licencia->max_reportes_mensuales,
+            'precio' => (float) $licencia->precio,
+            'precio_anual' => $licencia->precio_anual !== null ? (float) $licencia->precio_anual : null,
+            'dias_prueba' => (int) $licencia->dias_prueba,
+            'descripcion' => $licencia->descripcion,
+        ];
     }
 
     public function me(Request $request): JsonResponse
