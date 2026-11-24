@@ -11,6 +11,8 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
 class TicketController extends Controller
 {
@@ -161,10 +163,44 @@ class TicketController extends Controller
             'usuario_asignado_id' => 'nullable|integer',
             'area_id' => 'nullable|integer',
             'equipo_id' => 'nullable|integer',
+            'evidencias' => 'nullable|array|max:5',
+            'evidencias.*' => 'nullable|string',
         ]);
 
         $user = $this->authUser($request);
         $depId = (int) $user->dependencia_id;
+
+        $urlsEvidencias = [];
+        $evidenciasInput = (array) ($request->input('evidencias', []));
+        foreach ($evidenciasInput as $b64) {
+            if (! is_string($b64)) {
+                continue;
+            }
+            if (preg_match('#^data:image/(jpeg|jpg|png|webp);base64,(.+)$#is', $b64, $m)) {
+                $ext = strtolower($m[1]) === 'jpeg' ? 'jpg' : strtolower($m[1]);
+                $bytes = base64_decode($m[2], true);
+                if ($bytes !== false) {
+                    $path = 'evidencias_tickets/'.$depId.'/tkt_'.uniqid('int_', true).'.'.$ext;
+                    try {
+                        Storage::disk('public')->put($path, $bytes);
+                        $urlsEvidencias[] = Storage::disk('public')->url($path);
+                    } catch (\Throwable $e) {
+                        Log::warning('No se pudo guardar imagen de evidencia de ticket: '.$e->getMessage());
+                    }
+                }
+            }
+        }
+
+        unset($data['evidencias']);
+        if (! empty($urlsEvidencias)) {
+            $descBase = trim((string) ($data['descripcion'] ?? ''));
+            $descBase .= "\n\nEvidencias Fotográficas Adjuntas:\n";
+            foreach ($urlsEvidencias as $num => $url) {
+                $n = $num + 1;
+                $descBase .= "- Foto {$n}: {$url}\n";
+            }
+            $data['descripcion'] = trim($descBase);
+        }
 
         $data['dependencia_id'] = $depId;
         $data['usuario_asignado_id'] = $this->resolveFk($request, 'usuario_asignado_id', Usuario::class);
