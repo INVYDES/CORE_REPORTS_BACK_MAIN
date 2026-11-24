@@ -1,115 +1,59 @@
-# CsRecords - CoreReports
+<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
 
-Sistema multi-tenant para gestión de tickets, servicios programados y reportes técnicos con analytics en vivo.
+<p align="center">
+<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
+<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
+<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
+<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
+</p>
 
-**Stack:** Laravel 12 (PHP 8.5) + Vue 3 + Vite + MySQL 8 + Sanctum + Pinia
+## About Laravel
 
-## Arquitectura
-```
-CsRecords/
-├── BackEnd-Api/core-api/   # Laravel API (Sanctum, 70 endpoints, 13 views SQL)
-├── Front/                  # Vue 3 SPA (Vite, Pinia, Vue Router, ApexCharts)
-├── BD/                     # SQL: Tablas.sql + 04_Encuestas_y_Facturacion.sql
-├── docker-compose.yml      # db + backend + queue + scheduler + frontend
-└── Logico-Relacional.mwb   # MySQL Workbench model
-```
+Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
 
-## Requisitos
-- PHP 8.5, Composer, Node 20, MySQL 8, Docker (opcional)
+- [Simple, fast routing engine](https://laravel.com/docs/routing).
+- [Powerful dependency injection container](https://laravel.com/docs/container).
+- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
+- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
+- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
+- [Robust background job processing](https://laravel.com/docs/queues).
+- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
 
-## Instalación local (sin Docker)
-```bash
-# Backend
-cd BackEnd-Api/core-api
-cp .env.example .env
-# Edita DB_*, FRONTEND_URL, SENTRY_LARAVEL_DSN, MAIL_*
-composer install
-php artisan key:generate
-php artisan migrate --force
-php artisan db:seed --force   # Roles + demo empresa + 4 usuarios
-php artisan serve --host=127.0.0.1 --port=8000
+Laravel is accessible, powerful, and provides tools required for large, robust applications.
 
-# En otra terminal: queue + scheduler
-php artisan queue:work --sleep=3 --tries=3
-php artisan schedule:work
+## Learning Laravel
 
-# Frontend
-cd ../../Front
-cp .env.example .env
-# Edita VITE_API_URL=http://localhost:8000/api/v1
-npm ci
-npm run dev  # http://localhost:5173/core-reports/
-```
+Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
 
-## Docker (recomendado)
-```bash
-docker compose up --build
-# Frontend: http://localhost:5173/core-reports/
-# Backend:  http://localhost:8000/api/v1/me (Bearer token)
-# DB:       localhost:3307 (root/747375)
-# Queue + scheduler corren en el servicio `worker` (queue:work + schedule:work)
-```
+If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
 
-## Runtime de producción (Docker/Railway/Cloud Run)
-El contenedor arranca procesos bajo supervisor segun `CONTAINER_ROLE`:
+## Laravel Sponsors
 
-| Rol | Procesos |
-| --- | --- |
-| `all` (default) | web + worker de cola + scheduler |
-| `web` | `php artisan serve` (`PHP_CLI_SERVER_WORKERS`, default 4) |
-| `worker` | `queue:work` + `schedule:work` |
-| `scheduler` | solo `schedule:work` |
+We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
 
-- Solo los roles `web` y `all` ejecutan migraciones al arrancar; usa
-  `RUN_MIGRATIONS=false` para desactivarlas o `CONTAINER_ROLE=worker` en un
-  servicio aparte.
-- El scheduler dispara los jobs de `routes/console.php`:
-  `EnviarNotificacionesPendientes` (cada 5 min), `MarcarServiciosVencidos` y
-  `CheckLicenciasVencidas` (diarios). Sin worker/scheduler esos jobs nunca corren.
-- SLA de tickets por prioridad (horas): `SLA_TICKET_ALTA_HORAS` (4),
-  `SLA_TICKET_MEDIA_HORAS` (24), `SLA_TICKET_BAJA_HORAS` (72). Ver `config/sla.php`.
+### Premium Partners
 
-## Usuarios demo (password: `password`)
-- `admin.tec@core.com` (AdminTec, rol 1) - ve tickets, reportes, análisis
-- `admin.com@core.com` (AdminCom, rol 2) - ve análisis, subáreas
-- `tecnico@core.com` (Técnico, rol 3)
-- `cliente@core.com` (Cliente, rol 0)
+- **[Vehikl](https://vehikl.com)**
+- **[Tighten Co.](https://tighten.co)**
+- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
+- **[64 Robots](https://64robots.com)**
+- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
+- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
+- **[Redberry](https://redberry.international/laravel-development)**
+- **[Active Logic](https://activelogic.com)**
 
-## API
-- Versionada: `/api/v1/*`
-- Rate limit: `60 req/min` (throttle:60,1) - verificado con 61 req
-- Docs: `php artisan scribe:generate` -> `public/docs` (`/api/docs`)
-- Telescope: `http://localhost:8000/telescope` (si `TELESCOPE_ENABLED=true` + `APP_ENV=local`)
-- Analytics: `GET /api/v1/analytics/all` (11 views SQL, sin cache, en vivo)
+## Contributing
 
-## Observabilidad
-- Sentry: `SENTRY_LARAVEL_DSN` en .env
-- LogRocket: `VITE_LOGROCKET_ID` en Front/.env
-- Telescope para queries/jobs/logs
+Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
 
-## Lint / Tests / CI
-```bash
-# Backend
-composer run lint        # pint --test
-composer run lint:fix    # pint
-composer run analyse     # phpstan level 9
-php artisan test --coverage --min=70
+## Code of Conduct
 
-# Frontend
-npm run lint             # eslint
-npm run format:check     # prettier
-npm run test -- --coverage # vitest 70% threshold
-npm run build            # vite build
-npm run storybook        # http://localhost:6006 (StatCard)
-```
-CI: `.github/workflows/ci.yml` (PHP 8.5 + Node 20, install, pint, phpstan, phpunit, eslint, prettier, vitest, build, artifacts). Husky pre-commit: `pint --test && npm run lint && npm run test`.
+In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
 
-## Estructura DB
-- 13 tablas base + 4 nuevas (areas, equipos, notificaciones, movimientos_inventario) + 6 framework (jobs, cache, sessions...) + 1 encuestas + 10 columnas fiscales en dependencias
-- 11 views SQL (`vw_ticket_sla`, `vw_ticket_mttr`, etc.) creadas en migración `2026_09_03_000000_create_core_reports_schema.php`
-- Seed: `DatabaseSeeder` -> `CoreReportsSeeder` (roles, empresa demo, áreas, usuarios)
+## Security Vulnerabilities
 
-## Troubleshooting
-- `Unknown column 'conformidad'` -> views desactualizadas, corre `php artisan migrate:fresh --seed`
-- `CSRF token mismatch` -> usa Bearer token, no cookies (stateless)
-- `No se puede logear` -> verifica `roles` tiene 4 filas y `php artisan db:seed` corrió
+If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+
+## License
+
+The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
