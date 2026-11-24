@@ -216,13 +216,14 @@ class ReportePdfService
 
         $empresa = $this->reporte->dependencia;
         $empresaNombre = $empresa?->nombre ?: 'CoreReports';
-        $folio = $this->reporte->folio ?: 'REP-000';
+        $folio = (string) preg_replace('/^(TKT|REP|SRV)-20(\d{2}\d*-)/i', '$1-$2', (string) ($this->reporte->folio ?: 'REP-000'));
         $creador = $this->reporte->creador ? trim($this->reporte->creador->nombre.' '.$this->reporte->creador->apellidos) : '—';
         $puesto = $meta['cargo'] ?? ($this->reporte->creador?->puesto ?? 'Especialista Técnico');
         $numEmpleado = $this->reporte->creador?->numero_empleado ?? str_pad((string) ($this->reporte->creador?->id ?? '001'), 3, '0', STR_PAD_LEFT);
         $correo = $this->reporte->creador?->email ?? $empresa?->email ?? '—';
         $fecha = $this->reporte->fecha_inicio ? $this->reporte->fecha_inicio->format('Y-m-d') : ($this->reporte->created_at ? $this->reporte->created_at->format('Y-m-d') : '—');
-        $origenFolio = preg_replace('/^(Ticket|Servicio):\s*/i', '', (string) ($this->reporte->ticket?->folio ?? $this->reporte->servicio?->folio ?? '0000'));
+        $origenFolioRaw = preg_replace('/^(Ticket|Servicio):\s*/i', '', (string) ($this->reporte->ticket?->folio ?? $this->reporte->servicio?->folio ?? '0000'));
+        $origenFolio = (string) preg_replace('/^(TKT|REP|SRV)-20(\d{2}\d*-)/i', '$1-$2', (string) $origenFolioRaw);
         $areaNombre = $meta['areaTexto'] ?? ($this->reporte->area?->nombre ?? 'Área General');
         $responsableArea = $meta['responsable'] ?? ($this->reporte->responsable ? trim($this->reporte->responsable->nombre.' '.$this->reporte->responsable->apellidos) : '—');
 

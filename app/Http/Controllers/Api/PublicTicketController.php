@@ -67,17 +67,27 @@ class PublicTicketController extends Controller
 
     private function generarFolioSecuencial(int $dependenciaId): string
     {
-        $prefijo = 'TKT-'.now('America/Mexico_City')->format('Ymd');
+        $ahora = now('America/Mexico_City');
+        $prefijo = 'TKT-'.$ahora->format('ymd');
+        $prefijoLegacy = 'TKT-'.$ahora->format('Ymd');
 
-        $ultimo = Ticket::withoutGlobalScopes()
+        $ultimos = Ticket::withoutGlobalScopes()
             ->where('dependencia_id', $dependenciaId)
-            ->where('folio', 'like', $prefijo.'-%')
-            ->orderByDesc('folio')
-            ->value('folio');
+            ->where(function ($q) use ($prefijo, $prefijoLegacy) {
+                $q->where('folio', 'like', $prefijo.'-%')
+                    ->orWhere('folio', 'like', $prefijoLegacy.'-%');
+            })
+            ->pluck('folio');
 
-        $secuencia = $ultimo ? ((int) substr((string) $ultimo, -4)) + 1 : 1;
+        $maxSecuencia = 0;
+        foreach ($ultimos as $f) {
+            $num = (int) substr((string) $f, -4);
+            if ($num > $maxSecuencia) {
+                $maxSecuencia = $num;
+            }
+        }
 
-        return sprintf('%s-%04d', $prefijo, $secuencia);
+        return sprintf('%s-%04d', $prefijo, $maxSecuencia + 1);
     }
 
     /**

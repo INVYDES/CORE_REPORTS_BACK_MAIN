@@ -175,10 +175,10 @@ class Ticket extends Model
         return $query->where('prioridad', $prioridad);
     }
 
-    /** Folio único por dependencia: TKT-YYYYMMDD-XXXX (secuencial diario). */
+    /** Folio único por dependencia: TKT-YYMMDD-XXXX (secuencial diario). */
     public static function generarFolio(int $dependenciaId): string
     {
-        $prefijo = 'TKT-'.now()->format('Ymd');
+        $prefijo = 'TKT-'.now()->format('ymd');
 
         // La secuencia se reserva bloqueando la fila de la dependencia (y la
         // lectura del último folio es bloqueante) mientras dure la transacción

@@ -111,10 +111,10 @@ class Servicio extends Model
         return $query->whereIn('estatus', ['programado', 'en_proceso'])->orderBy('fecha_vencimiento');
     }
 
-    /** Folio único por dependencia: SRV-YYYYMMDD-XXXX (secuencial diario). */
+    /** Folio único por dependencia: SRV-YYMMDD-XXXX (secuencial diario). */
     public static function generarFolio(int $dependenciaId): string
     {
-        $prefijo = 'SRV-'.now()->format('Ymd');
+        $prefijo = 'SRV-'.now()->format('ymd');
 
         // Secuencia serializada por dependencia; ver Ticket::generarFolio.
         DB::table('dependencias')->where('id', $dependenciaId)->lockForUpdate()->first();

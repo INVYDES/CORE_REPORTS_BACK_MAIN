@@ -157,10 +157,10 @@ class Reporte extends Model
         return $tipo ? $query->where('tipo', $tipo) : $query;
     }
 
-    /** Folio único por dependencia: REP-YYYYMM-XXXXX (secuencial mensual). */
+    /** Folio único por dependencia: REP-YYMM-XXXXX (secuencial mensual). */
     public static function generarFolio(int $dependenciaId): string
     {
-        $prefijo = 'REP-'.now()->format('Ym');
+        $prefijo = 'REP-'.now()->format('ym');
 
         // Secuencia serializada por dependencia; ver Ticket::generarFolio. El
         // alta de reportes ya genera el folio dentro de su transacción.

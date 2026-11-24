@@ -92,17 +92,27 @@ class ReporteController extends Controller
 
     private function generarFolioSecuencial(int $dependenciaId): string
     {
-        $prefijo = 'REP-'.now('America/Mexico_City')->format('Ymd');
+        $ahora = now('America/Mexico_City');
+        $prefijo = 'REP-'.$ahora->format('ymd');
+        $prefijoLegacy = 'REP-'.$ahora->format('Ymd');
 
-        $ultimo = Reporte::withoutGlobalScopes()
+        $ultimos = Reporte::withoutGlobalScopes()
             ->where('dependencia_id', $dependenciaId)
-            ->where('folio', 'like', $prefijo.'-%')
-            ->orderByDesc('folio')
-            ->value('folio');
+            ->where(function ($q) use ($prefijo, $prefijoLegacy) {
+                $q->where('folio', 'like', $prefijo.'-%')
+                    ->orWhere('folio', 'like', $prefijoLegacy.'-%');
+            })
+            ->pluck('folio');
 
-        $secuencia = $ultimo ? ((int) substr((string) $ultimo, -4)) + 1 : 1;
+        $maxSecuencia = 0;
+        foreach ($ultimos as $f) {
+            $num = (int) substr((string) $f, -4);
+            if ($num > $maxSecuencia) {
+                $maxSecuencia = $num;
+            }
+        }
 
-        return sprintf('%s-%04d', $prefijo, $secuencia);
+        return sprintf('%s-%04d', $prefijo, $maxSecuencia + 1);
     }
 
     /**
@@ -153,6 +163,20 @@ class ReporteController extends Controller
 
     public function index(Request $request): JsonResponse
     {
+        $user = $request->user() ?? auth()->user();
+        if ($user && isset($user->dependencia_id)) {
+            try {
+                DB::table('reportes')
+                    ->where('dependencia_id', (int) $user->dependencia_id)
+                    ->where('folio', 'like', 'REP-20%')
+                    ->update([
+                        'folio' => DB::raw("CONCAT('REP-', SUBSTRING(folio, 7))"),
+                    ]);
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        }
+
         $q = $this->filteredQuery($request)
             ->with(['creador', 'responsable', 'ticket', 'servicio', 'ejecutores.usuario', 'materiales.material']);
 
@@ -829,14 +853,15 @@ class ReporteController extends Controller
 
         $e = fn ($val) => htmlspecialchars((string) ($val ?? ''), ENT_QUOTES, 'UTF-8');
         $empresaNombre = $e($empresa?->nombre ?? 'CoreReports');
-        $folio = $e($reporte->folio);
+        $folio = $e(preg_replace('/^(TKT|REP|SRV)-20(\d{2}\d*-)/i', '$1-$2', (string) $reporte->folio));
         $creador = $e($reporte->creador ? trim($reporte->creador->nombre.' '.$reporte->creador->apellidos) : '—');
         $puesto = $e($meta['cargo'] ?? ($reporte->creador?->puesto ?? 'Especialista Técnico'));
         $numEmpleado = $e($reporte->creador?->numero_empleado ?? str_pad((string) ($reporte->creador?->id ?? '001'), 3, '0', STR_PAD_LEFT));
         $correo = $e($reporte->creador?->email ?? $empresa?->email ?? '—');
         $fecha = $reporte->fecha_inicio ? $reporte->fecha_inicio->format('Y-m-d') : ($reporte->created_at ? $reporte->created_at->format('Y-m-d') : '—');
 
-        $origenFolio = $e(preg_replace('/^(Ticket|Servicio):\s*/i', '', (string) ($reporte->ticket?->folio ?? $reporte->servicio?->folio ?? '0000')));
+        $origenFolioClean = preg_replace('/^(Ticket|Servicio):\s*/i', '', (string) ($reporte->ticket?->folio ?? $reporte->servicio?->folio ?? '0000'));
+        $origenFolio = $e(preg_replace('/^(TKT|REP|SRV)-20(\d{2}\d*-)/i', '$1-$2', (string) $origenFolioClean));
         $areaNombre = $e($meta['areaTexto'] ?? ($reporte->area?->nombre ?? 'Área General'));
         $responsableArea = $e($meta['responsable'] ?? ($reporte->responsable ? trim($reporte->responsable->nombre.' '.$reporte->responsable->apellidos) : '—'));
 
