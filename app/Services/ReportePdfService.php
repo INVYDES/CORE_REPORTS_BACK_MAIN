@@ -240,6 +240,20 @@ class ReportePdfService
             $m = $diffMins % 60;
             $totalHoras = "{$h}h {$m}m";
         }
+        $esEnTercero = isset($meta['esEnTercero'])
+            ? (bool) $meta['esEnTercero']
+            : (bool) ($this->reporte->hora_salida || $this->reporte->hora_llegada || $this->reporte->hora_regreso);
+        $salidaBase = $this->reporte->hora_salida ? $this->reporte->hora_salida->format('H:i') : '--:--';
+        $llegadaSitio = $this->reporte->hora_llegada ? $this->reporte->hora_llegada->format('H:i') : '--:--';
+        $regresoBase = $this->reporte->hora_regreso ? $this->reporte->hora_regreso->format('H:i') : '--:--';
+        $arrastreMins = 0;
+        if ($this->reporte->hora_salida && $this->reporte->hora_llegada && $this->reporte->hora_llegada->gt($this->reporte->hora_salida)) {
+            $arrastreMins += $this->reporte->hora_salida->diffInMinutes($this->reporte->hora_llegada);
+        }
+        if ($this->reporte->fecha_fin && $this->reporte->hora_regreso && $this->reporte->hora_regreso->gt($this->reporte->fecha_fin)) {
+            $arrastreMins += $this->reporte->fecha_fin->diffInMinutes($this->reporte->hora_regreso);
+        }
+        $tiempoArrastre = sprintf('%dh %dm', (int) floor($arrastreMins / 60), $arrastreMins % 60);
 
         $this->newPage();
         $x = $this->marginLeft;
@@ -315,14 +329,22 @@ class ReportePdfService
         $this->drawSectionBox('CONCLUSIÓN DEL SERVICIO', $conclusion, $y);
 
         // ================= TIEMPOS =================
-        if ($y - 20.0 < 70.0) {
+        if ($y - 36.0 < 70.0) {
             $this->newPage();
             $y = 740.0;
         }
 
-        $strTiempos = "Tiempos:     Inicio: {$inicio}     Fin: {$fin}     Total: {$totalHoras}";
-        $this->text($x, $y - 12.0, $strTiempos, 'F2', 9.0, [0, 0, 0]);
-        $y -= 22.0;
+        if ($esEnTercero) {
+            $strTiempos1 = "Tiempos:   Salida Base: {$salidaBase}   Llegada a Sitio: {$llegadaSitio}   Inicio: {$inicio}   Fin: {$fin}   Regreso a Base: {$regresoBase}";
+            $strTiempos2 = "Trabajo Neto: {$totalHoras}     Tiempo de Arrastre: {$tiempoArrastre}";
+            $this->text($x, $y - 12.0, $strTiempos1, 'F2', 8.5, [0, 0, 0]);
+            $this->text($x, $y - 26.0, $strTiempos2, 'F2', 8.5, [0, 0, 0]);
+            $y -= 36.0;
+        } else {
+            $strTiempos = "Tiempos:     Inicio: {$inicio}     Fin: {$fin}     Total: {$totalHoras}";
+            $this->text($x, $y - 12.0, $strTiempos, 'F2', 9.0, [0, 0, 0]);
+            $y -= 22.0;
+        }
 
         // ================= MATERIALES (SI TIENE) =================
         if ($this->reporte->materiales->isNotEmpty()) {

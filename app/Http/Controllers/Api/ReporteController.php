@@ -897,6 +897,24 @@ class ReporteController extends Controller
             $totalHoras = "{$h}h {$m}m";
         }
 
+        $esEnTercero = isset($meta['esEnTercero'])
+            ? (bool) $meta['esEnTercero']
+            : (bool) ($reporte->hora_salida || $reporte->hora_llegada || $reporte->hora_regreso);
+        $salidaBase = $reporte->hora_salida ? $reporte->hora_salida->format('H:i') : '--:--';
+        $llegadaSitio = $reporte->hora_llegada ? $reporte->hora_llegada->format('H:i') : '--:--';
+        $regresoBase = $reporte->hora_regreso ? $reporte->hora_regreso->format('H:i') : '--:--';
+        $arrastreMins = 0;
+        if ($reporte->hora_salida && $reporte->hora_llegada && $reporte->hora_llegada->gt($reporte->hora_salida)) {
+            $arrastreMins += $reporte->hora_salida->diffInMinutes($reporte->hora_llegada);
+        }
+        if ($reporte->fecha_fin && $reporte->hora_regreso && $reporte->hora_regreso->gt($reporte->fecha_fin)) {
+            $arrastreMins += $reporte->fecha_fin->diffInMinutes($reporte->hora_regreso);
+        }
+        $tiempoArrastre = sprintf('%dh %dm', (int) floor($arrastreMins / 60), $arrastreMins % 60);
+        $tiemposHtml = $esEnTercero
+            ? "<div><b>Tiempos:</b> &nbsp;&nbsp; <b>Salida Base:</b> {$salidaBase} &nbsp;&nbsp; <b>Llegada a Sitio:</b> {$llegadaSitio} &nbsp;&nbsp; <b>Inicio:</b> {$inicio} &nbsp;&nbsp; <b>Fin:</b> {$fin} &nbsp;&nbsp; <b>Regreso a Base:</b> {$regresoBase}</div><div style=\"margin-top:4px;\"><b>Trabajo Neto:</b> {$totalHoras} &nbsp;&nbsp;&nbsp;&nbsp; <b>Tiempo de Arrastre:</b> {$tiempoArrastre}</div>"
+            : "<b>Tiempos:</b> &nbsp;&nbsp;&nbsp;&nbsp; <b>Inicio:</b> {$inicio} &nbsp;&nbsp;&nbsp;&nbsp; <b>Fin:</b> {$fin} &nbsp;&nbsp;&nbsp;&nbsp; <b>Total:</b> {$totalHoras}";
+
         // Materiales
         $matsHtml = '';
         if ($reporte->materiales->isNotEmpty()) {
@@ -999,7 +1017,7 @@ class ReporteController extends Controller
             <div class=\"section-content\">{$conclusionHtml}</div>
 
             <div class=\"tiempos-line\">
-                <b>Tiempos:</b> &nbsp;&nbsp;&nbsp;&nbsp; <b>Inicio:</b> {$inicio} &nbsp;&nbsp;&nbsp;&nbsp; <b>Fin:</b> {$fin} &nbsp;&nbsp;&nbsp;&nbsp; <b>Total:</b> {$totalHoras}
+                {$tiemposHtml}
             </div>
 
             {$matsHtml}
