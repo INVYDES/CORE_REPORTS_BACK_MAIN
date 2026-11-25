@@ -91,8 +91,10 @@ class VerificacionCorreoService
             return ['error' => 'codigo'];
         }
 
-        if ($usuario->email_verified_at !== null) {
-            return ['usuario' => $usuario];
+        // Cuenta desactivada: se responde como código inválido para no revelar
+        // el estado de la cuenta a quien solo conoce el correo.
+        if (! $usuario->estado) {
+            return ['error' => 'codigo'];
         }
 
         $registro = $usuario->verificacionesCorreo()

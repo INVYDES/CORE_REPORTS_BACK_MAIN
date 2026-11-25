@@ -100,6 +100,35 @@ class CorreoAutenticacionTest extends TestCase
         $this->assertNotNull($usuario->fresh()->email_verified_at);
     }
 
+    public function test_codigo_no_emite_sesion_para_cuenta_ya_verificada_sin_codigo_valido(): void
+    {
+        Mail::fake();
+        $usuario = $this->usuario($this->dependencia(), true);
+
+        $this->postJson('/api/v1/auth/verificar-codigo', [
+            'email' => $usuario->email,
+            'codigo' => '000000',
+        ])
+            ->assertStatus(422)
+            ->assertJsonMissingPath('token');
+    }
+
+    public function test_codigo_no_emite_sesion_para_cuenta_desactivada(): void
+    {
+        Mail::fake();
+        $usuario = $this->usuario($this->dependencia());
+        $usuario->update(['estado' => false]);
+
+        $this->postJson('/api/v1/auth/verificar-codigo', [
+            'email' => $usuario->email,
+            'codigo' => '000000',
+        ])
+            ->assertStatus(422)
+            ->assertJsonMissingPath('token');
+
+        $this->assertNull($usuario->fresh()->email_verified_at);
+    }
+
     public function test_enlace_magico_verifica_la_cuenta(): void
     {
         Mail::fake();

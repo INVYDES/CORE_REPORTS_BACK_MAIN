@@ -165,7 +165,8 @@ class CorreoAutomatizadoService
         $admin = $dependencia->usuarios()
             ->where('estado', true)
             ->whereIn('rol', [Usuario::ROLE_ADMIN_TEC, Usuario::ROLE_ADMIN_COM])
-            ->orderBy('rol')
+            ->orderByRaw('CASE WHEN rol = ? THEN 0 ELSE 1 END', [Usuario::ROLE_ADMIN_COM])
+            ->orderBy('id')
             ->first();
 
         if ($admin instanceof Usuario && $admin->email) {
