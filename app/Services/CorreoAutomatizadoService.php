@@ -15,6 +15,7 @@ use App\Models\Licencia;
 use App\Models\Notificacion;
 use App\Models\Usuario;
 use Carbon\CarbonInterface;
+use Illuminate\Database\QueryException;
 use Illuminate\Mail\Mailable;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -194,15 +195,7 @@ class CorreoAutomatizadoService
             return null;
         }
 
-        $log = $clave !== null
-            ? CorreoLog::firstOrNew(['clave' => $clave])
-            : new CorreoLog;
-
-        if ($log->exists && $log->estado === 'enviado') {
-            return $log;
-        }
-
-        $log->fill([
+        $payload = [
             'usuario_id' => $usuario?->id,
             'dependencia_id' => $dependenciaId,
             'tipo' => $tipo,
@@ -211,7 +204,44 @@ class CorreoAutomatizadoService
             'estado' => 'pendiente',
             'error' => null,
             'metadata' => $metadata,
-        ])->save();
+        ];
+
+        $log = $clave !== null
+            ? CorreoLog::firstOrNew(['clave' => $clave])
+            : new CorreoLog;
+
+        if ($log->exists && $log->estado === 'enviado') {
+            return $log;
+        }
+
+        try {
+            $log->fill($payload)->save();
+        } catch (QueryException $e) {
+            // Otra petición registró la misma clave al mismo tiempo: reutilizarla.
+            $log = $clave !== null ? CorreoLog::where('clave', $clave)->first() : null;
+
+            if ($log === null) {
+                throw $e;
+            }
+
+            if ($log->estado === 'enviado') {
+                return $log;
+            }
+
+            $log->fill($payload)->save();
+        }
+
+        // Con el transporte "log" (MAIL_MAILER=log) nada sale al exterior. Se
+        // registra como fallido para que la deduplicación no bloquee un envío
+        // real cuando se configure el SMTP.
+        if (config('mail.default') === 'log') {
+            $log->update([
+                'estado' => 'fallido',
+                'error' => 'Transporte de correo en modo log: el mensaje no se envió realmente.',
+            ]);
+
+            return $log;
+        }
 
         try {
             Mail::to($destinatario)->send($mailable);

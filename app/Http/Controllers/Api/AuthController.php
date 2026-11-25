@@ -184,7 +184,6 @@ class AuthController extends Controller
         $user = Usuario::where('email', $data['email'])->firstOrFail();
 
         $this->correos->enviarBienvenida($user, $licencia);
-        $verificacion = $this->verificaciones->solicitar($user, $request);
 
         $payload = [
             'dependencia' => $dependencia,
@@ -194,6 +193,8 @@ class AuthController extends Controller
         ];
 
         if (config('correo.verificacion_obligatoria')) {
+            $verificacion = $this->verificaciones->solicitar($user, $request);
+
             return response()->json([
                 ...$payload,
                 'requiere_verificacion' => true,

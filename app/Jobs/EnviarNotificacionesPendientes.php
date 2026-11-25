@@ -25,6 +25,12 @@ class EnviarNotificacionesPendientes implements ShouldQueue
 
     public function handle(CorreoAutomatizadoService $correos): void
     {
+        // Sin transporte real de correo los envíos no saldrían; se dejan las
+        // notificaciones en "pendiente" para no marcarlas como enviadas en falso.
+        if (config('mail.default') === 'log') {
+            return;
+        }
+
         Notificacion::query()
             ->where('estatus', 'pendiente')
             ->whereNotNull('destinatario')

@@ -2,10 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Mail\BienvenidaMail;
 use App\Mail\RecuperarPasswordMail;
 use App\Mail\VerificacionCuentaMail;
 use App\Models\Dependencia;
 use App\Models\Usuario;
+use App\Services\CorreoAutomatizadoService;
 use Database\Seeders\LicenciaCatalogoSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
@@ -127,6 +129,50 @@ class CorreoAutenticacionTest extends TestCase
             ->assertJsonMissingPath('token');
 
         $this->assertNull($usuario->fresh()->email_verified_at);
+    }
+
+    public function test_registro_con_verificacion_desactivada_no_envia_correo_de_verificacion(): void
+    {
+        Mail::fake();
+        config(['correo.verificacion_obligatoria' => false]);
+        $this->seed(LicenciaCatalogoSeeder::class);
+
+        $plan = $this->getJson('/api/v1/licencias/disponibles')->json('data.0');
+
+        $response = $this->postJson('/api/v1/public/register-compania', [
+            'companyName' => 'Empresa Sin Verificacion',
+            'email' => 'sinverificacion@empresa.com',
+            'password' => 'password123',
+            'firstName' => 'Luis',
+            'lastNamePaternal' => 'Prueba',
+            'licenciaToken' => $plan['token'],
+        ])
+            ->assertStatus(201)
+            ->assertJsonMissingPath('requiere_verificacion');
+
+        $this->assertNotEmpty($response->json('token'));
+        Mail::assertNotSent(VerificacionCuentaMail::class);
+        Mail::assertSent(BienvenidaMail::class);
+    }
+
+    public function test_transporte_log_no_marca_correos_como_enviados_y_permite_reenvio_real(): void
+    {
+        Mail::fake();
+        config(['mail.default' => 'log']);
+        $usuario = $this->usuario($this->dependencia());
+        $servicio = app(CorreoAutomatizadoService::class);
+
+        $primero = $servicio->enviarBienvenida($usuario);
+
+        $this->assertNotNull($primero);
+        $this->assertSame('fallido', $primero->estado);
+        $this->assertStringContainsString('modo log', (string) $primero->error);
+
+        config(['mail.default' => 'array']);
+        $segundo = $servicio->enviarBienvenida($usuario);
+
+        $this->assertSame('enviado', $segundo->fresh()->estado);
+        Mail::assertSent(BienvenidaMail::class);
     }
 
     public function test_enlace_magico_verifica_la_cuenta(): void
