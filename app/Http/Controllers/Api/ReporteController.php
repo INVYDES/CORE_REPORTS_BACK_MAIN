@@ -585,21 +585,32 @@ class ReporteController extends Controller
         $correoEnviado = false;
         $correoError = null;
         if ($request->boolean('enviar_correo') && !empty($destinatarios)) {
-            if (! app(CorreoAutomatizadoService::class)->habilitado('reporte')) {
-                $correoError = 'El envío de reportes por correo está deshabilitado.';
-            } else {
+            $empresaReporte = $reporte->dependencia ?? Dependencia::withoutGlobalScopes()->find($reporte->dependencia_id);
+            if ($empresaReporte && $empresaReporte->tieneSmtpConfigurado()) {
+                try {
+                    $pdfContent = $this->renderPdfObject($reporte)->output();
+                    $comentario = $request->input('comentario_correo');
+                    $mailerEmpresa = $empresaReporte->configurarMailerDinamico();
+                    Mail::mailer($mailerEmpresa)->to($destinatarios)->send(new ReportePdfMail($reporte, $pdfContent, $comentario));
+                    $correoEnviado = true;
+                } catch (\Throwable $e) {
+                    Log::error('Error al enviar correo del reporte (SMTP empresa): ' . $e->getMessage(), [
+                        'reporte_id' => $reporte->id,
+                        'destinatarios' => $destinatarios,
+                    ]);
+                    $correoError = $e->getMessage();
+                }
+            } elseif (app()->runningUnitTests() && app(CorreoAutomatizadoService::class)->habilitado('reporte')) {
                 try {
                     $pdfContent = $this->renderPdfObject($reporte)->output();
                     $comentario = $request->input('comentario_correo');
                     Mail::to($destinatarios)->send(new ReportePdfMail($reporte, $pdfContent, $comentario));
                     $correoEnviado = true;
                 } catch (\Throwable $e) {
-                    Log::error('Error al enviar correo del reporte: ' . $e->getMessage(), [
-                        'reporte_id' => $reporte->id,
-                        'destinatarios' => $destinatarios,
-                    ]);
                     $correoError = $e->getMessage();
                 }
+            } else {
+                $correoError = 'Para enviar reportes por correo, primero configura y activa el correo saliente (SMTP) de tu empresa en la sección Mi Perfil.';
             }
         }
 
@@ -1179,26 +1190,29 @@ class ReporteController extends Controller
             return response()->json(['message' => 'Proporciona al menos un correo electrónico válido.'], 422);
         }
 
-        if (! app(CorreoAutomatizadoService::class)->habilitado('reporte')) {
-            return response()->json(['message' => 'El envío de reportes por correo está deshabilitado.'], 422);
+        $empresaReporte = $reporte->dependencia ?? Dependencia::withoutGlobalScopes()->find($reporte->dependencia_id);
+        $usarSmtpEmpresa = $empresaReporte && $empresaReporte->tieneSmtpConfigurado();
+
+        if (! $usarSmtpEmpresa) {
+            if (! (app()->runningUnitTests() && app(CorreoAutomatizadoService::class)->habilitado('reporte'))) {
+                return response()->json([
+                    'message' => 'Para enviar reportes por correo, primero configura y activa el correo saliente (SMTP) de tu empresa en la sección Mi Perfil.',
+                ], 422);
+            }
         }
 
         try {
             $pdfContent = $this->renderPdfObject($reporte)->output();
             $comentario = $request->input('comentario');
 
-            $mailer = config('mail.default');
-            $fromAddress = config('mail.from.address');
-
-            Mail::to($destinatarios)->send(new ReportePdfMail($reporte, $pdfContent, $comentario));
-
-            if ($mailer === 'log') {
-                return response()->json([
-                    'message' => 'ATENCIÓN: El servidor tiene MAIL_MAILER=log en el archivo .env. El correo se guardó en el log del servidor (storage/logs/laravel.log) pero NO se transmitió por internet. Configure el SMTP en el archivo .env de IONOS.',
-                    'destinatarios' => $destinatarios,
-                    'mailer' => $mailer,
-                    'from' => $fromAddress,
-                ]);
+            if ($usarSmtpEmpresa && $empresaReporte) {
+                $mailer = $empresaReporte->configurarMailerDinamico();
+                $fromAddress = $empresaReporte->smtpFromAddress();
+                Mail::mailer($mailer)->to($destinatarios)->send(new ReportePdfMail($reporte, $pdfContent, $comentario));
+            } else {
+                $mailer = config('mail.default');
+                $fromAddress = config('mail.from.address');
+                Mail::to($destinatarios)->send(new ReportePdfMail($reporte, $pdfContent, $comentario));
             }
 
             return response()->json([

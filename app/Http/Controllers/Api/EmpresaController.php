@@ -8,8 +8,10 @@ use App\Models\Usuario;
 use App\Services\UploadStorageService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
@@ -374,6 +376,233 @@ class EmpresaController extends Controller
                 'message' => 'Error al subir el logotipo: ' . $e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * GET /api/v1/empresa/smtp
+     * Devuelve la configuración SMTP de la empresa actual sin exponer la contraseña
+     */
+    public function getSmtp(Request $request): JsonResponse
+    {
+        if (! $this->puedeEditar($request)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No tienes permisos para consultar la configuración SMTP.',
+            ], 403);
+        }
+
+        $empresa = $this->empresaDelUsuario($request);
+        if (! $empresa) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Empresa no encontrada.',
+            ], 404);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => $this->formatSmtp($empresa),
+        ]);
+    }
+
+    /**
+     * PUT /api/v1/empresa/smtp
+     * Guarda la configuración SMTP personalizada de la empresa
+     */
+    public function updateSmtp(Request $request): JsonResponse
+    {
+        if (! $this->puedeEditar($request)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No tienes permisos para modificar la configuración SMTP.',
+            ], 403);
+        }
+
+        $empresa = $this->empresaDelUsuario($request);
+        if (! $empresa) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Empresa no encontrada.',
+            ], 404);
+        }
+
+        $data = $request->validate([
+            'smtp_activo' => 'sometimes|boolean',
+            'smtp_host' => 'nullable|string|max:191',
+            'smtp_port' => 'nullable|integer|min:1|max:65535',
+            'smtp_encryption' => 'nullable|string|in:tls,ssl,none',
+            'smtp_username' => 'nullable|string|max:191',
+            'smtp_password' => 'nullable|string|max:500',
+            'smtp_from_address' => 'nullable|email|max:191',
+            'smtp_from_name' => 'nullable|string|max:191',
+        ]);
+
+        $activo = (bool) ($data['smtp_activo'] ?? $empresa->smtp_activo ?? false);
+        $host = isset($data['smtp_host']) ? trim((string) $data['smtp_host']) : $empresa->smtp_host;
+        $port = isset($data['smtp_port']) ? (int) $data['smtp_port'] : ($empresa->smtp_port ?: 587);
+        $enc = isset($data['smtp_encryption']) ? strtolower(trim((string) $data['smtp_encryption'])) : ($empresa->smtp_encryption ?: 'tls');
+        $username = isset($data['smtp_username']) ? trim((string) $data['smtp_username']) : $empresa->smtp_username;
+        $fromAddress = isset($data['smtp_from_address']) && trim((string) $data['smtp_from_address']) !== ''
+            ? trim((string) $data['smtp_from_address'])
+            : $username;
+        $fromName = isset($data['smtp_from_name']) && trim((string) $data['smtp_from_name']) !== ''
+            ? trim((string) $data['smtp_from_name'])
+            : $empresa->nombre;
+
+        $empresa->smtp_activo = $activo;
+        $empresa->smtp_host = $host ?: null;
+        $empresa->smtp_port = $port ?: 587;
+        $empresa->smtp_encryption = $enc ?: 'tls';
+        $empresa->smtp_username = $username ?: null;
+        $empresa->smtp_from_address = $fromAddress ?: null;
+        $empresa->smtp_from_name = $fromName ?: null;
+
+        if ($request->filled('smtp_password')) {
+            $rawPass = (string) $request->input('smtp_password');
+            if ($rawPass !== '' && ! preg_match('/^[•*]+$/u', $rawPass)) {
+                $empresa->smtp_password = Crypt::encryptString($rawPass);
+            }
+        }
+
+        if ($activo && (empty($empresa->smtp_host) || empty($empresa->smtp_username) || empty($empresa->smtp_password))) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Para activar el envío por SMTP completa el servidor (Host), el usuario/correo y la contraseña.',
+            ], 422);
+        }
+
+        $empresa->save();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Configuración de correo saliente (SMTP) guardada correctamente.',
+            'data' => $this->formatSmtp($empresa),
+        ]);
+    }
+
+    /**
+     * POST /api/v1/empresa/smtp/probar
+     * Envía un correo de prueba con las credenciales proporcionadas o guardadas
+     */
+    public function probarSmtp(Request $request): JsonResponse
+    {
+        if (! $this->puedeEditar($request)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No tienes permisos para probar la configuración SMTP.',
+            ], 403);
+        }
+
+        $empresa = $this->empresaDelUsuario($request);
+        if (! $empresa) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Empresa no encontrada.',
+            ], 404);
+        }
+
+        $user = $this->usuario($request);
+
+        $host = trim((string) $request->input('smtp_host', $empresa->smtp_host ?? ''));
+        $port = (int) $request->input('smtp_port', $empresa->smtp_port ?: 587);
+        $enc = strtolower(trim((string) $request->input('smtp_encryption', $empresa->smtp_encryption ?: 'tls')));
+        $username = trim((string) $request->input('smtp_username', $empresa->smtp_username ?? ''));
+        $fromAddress = trim((string) $request->input('smtp_from_address', $empresa->smtp_from_address ?: $username));
+        $fromName = trim((string) $request->input('smtp_from_name', $empresa->smtp_from_name ?: $empresa->nombre ?: 'CoreReports'));
+
+        $rawPass = (string) $request->input('smtp_password', '');
+        if ($rawPass !== '' && ! preg_match('/^[•*]+$/u', $rawPass)) {
+            $password = $rawPass;
+        } else {
+            $password = $empresa->smtpPasswordDecrypted();
+        }
+
+        if ($host === '' || $username === '' || empty($password)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Completa Servidor SMTP (Host), Usuario y Contraseña antes de probar la conexión.',
+            ], 422);
+        }
+
+        if (! filter_var($fromAddress, FILTER_VALIDATE_EMAIL)) {
+            $fromAddress = filter_var($username, FILTER_VALIDATE_EMAIL) ? $username : 'no-reply@corereports.com';
+        }
+
+        $destinatario = trim((string) $request->input('destinatario', ''));
+        if (! filter_var($destinatario, FILTER_VALIDATE_EMAIL)) {
+            $destinatario = filter_var($user->email, FILTER_VALIDATE_EMAIL)
+                ? $user->email
+                : (filter_var($empresa->correo_reportes, FILTER_VALIDATE_EMAIL)
+                    ? $empresa->correo_reportes
+                    : $fromAddress);
+        }
+
+        $mailerName = 'empresa_smtp_test_' . $empresa->id;
+        $scheme = $enc === 'ssl' ? 'smtps' : 'smtp';
+
+        config([
+            "mail.mailers.{$mailerName}" => [
+                'transport' => 'smtp',
+                'scheme' => $scheme,
+                'host' => $host,
+                'port' => $port ?: 587,
+                'encryption' => in_array($enc, ['tls', 'ssl'], true) ? $enc : null,
+                'username' => $username,
+                'password' => $password,
+                'timeout' => 15,
+            ],
+        ]);
+
+        try {
+            Mail::purge($mailerName);
+        } catch (\Throwable) {
+        }
+
+        try {
+            $empresaNombre = $empresa->nombre ?: 'Tu Empresa';
+            Mail::mailer($mailerName)->raw(
+                "Hola {$user->nombre},\n\n"
+                . "Esta es una prueba de conexión SMTP desde CoreReports para {$empresaNombre}.\n"
+                . "Servidor: {$host}:{$port} (" . strtoupper($enc) . ")\n"
+                . "Remitente: {$fromName} <{$fromAddress}>\n\n"
+                . "Tu configuración de correo saliente para envío de reportes funciona correctamente.",
+                function ($message) use ($destinatario, $fromAddress, $fromName, $empresaNombre) {
+                    $message->to($destinatario)
+                        ->from($fromAddress, $fromName)
+                        ->subject("Prueba de conexión SMTP exitosa - {$empresaNombre}");
+                }
+            );
+
+            return response()->json([
+                'success' => true,
+                'message' => "Conexión SMTP exitosa. Se envió un correo de prueba a {$destinatario}.",
+                'destinatario' => $destinatario,
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('Fallo prueba SMTP para empresa ' . $empresa->id . ': ' . $e->getMessage());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'No se pudo conectar al servidor SMTP: ' . $e->getMessage(),
+            ], 422);
+        }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function formatSmtp(Dependencia $e): array
+    {
+        return [
+            'smtp_activo' => (bool) ($e->smtp_activo ?? false),
+            'smtp_host' => (string) ($e->smtp_host ?? ''),
+            'smtp_port' => (int) ($e->smtp_port ?: 587),
+            'smtp_encryption' => (string) ($e->smtp_encryption ?: 'tls'),
+            'smtp_username' => (string) ($e->smtp_username ?? ''),
+            'smtp_from_address' => (string) ($e->smtp_from_address ?: $e->smtp_username ?: ''),
+            'smtp_from_name' => (string) ($e->smtp_from_name ?: $e->nombre ?: ''),
+            'has_password' => ! empty($e->smtp_password),
+        ];
     }
 
     /**

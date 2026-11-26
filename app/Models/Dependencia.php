@@ -6,6 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\Mail;
 
 /**
  * @property int $id
@@ -40,6 +42,12 @@ class Dependencia extends Model
         'limite_usuarios', 'limite_reportes_mensuales',
         'correo_contacto', 'correo_reportes', 'telefono', 'datos_facturacion', 'activa', 'es_plataforma', 'logo',
         'logo_ruta', 'logo_disco', 'trial_usado_at',
+        'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username',
+        'smtp_password', 'smtp_from_address', 'smtp_from_name', 'smtp_activo',
+    ];
+
+    protected $hidden = [
+        'smtp_password',
     ];
 
     protected $casts = [
@@ -49,7 +57,73 @@ class Dependencia extends Model
         'es_plataforma' => 'boolean',
         'limite_usuarios' => 'integer',
         'limite_reportes_mensuales' => 'integer',
+        'smtp_port' => 'integer',
+        'smtp_activo' => 'boolean',
     ];
+
+    public function tieneSmtpConfigurado(): bool
+    {
+        return (bool) $this->smtp_activo
+            && ! empty($this->smtp_host)
+            && ! empty($this->smtp_port)
+            && ! empty($this->smtp_username)
+            && ! empty($this->smtp_password);
+    }
+
+    public function smtpPasswordDecrypted(): ?string
+    {
+        if (empty($this->smtp_password)) {
+            return null;
+        }
+
+        try {
+            return Crypt::decryptString((string) $this->smtp_password);
+        } catch (\Throwable) {
+            return (string) $this->smtp_password;
+        }
+    }
+
+    public function smtpFromAddress(): string
+    {
+        $from = trim((string) ($this->smtp_from_address ?: $this->smtp_username ?: config('mail.from.address')));
+
+        return $from !== '' ? $from : 'no-reply@corereports.com';
+    }
+
+    public function smtpFromName(): string
+    {
+        $name = trim((string) ($this->smtp_from_name ?: $this->nombre ?: config('mail.from.name')));
+
+        return $name !== '' ? $name : 'CoreReports';
+    }
+
+    public function configurarMailerDinamico(): string
+    {
+        $mailerName = 'empresa_smtp_' . ($this->id ?: 'temp');
+        $enc = strtolower(trim((string) ($this->smtp_encryption ?? 'tls')));
+        $scheme = $enc === 'ssl' ? 'smtps' : 'smtp';
+
+        config([
+            "mail.mailers.{$mailerName}" => [
+                'transport' => 'smtp',
+                'scheme' => $scheme,
+                'host' => trim((string) $this->smtp_host),
+                'port' => (int) ($this->smtp_port ?: 587),
+                'encryption' => in_array($enc, ['tls', 'ssl'], true) ? $enc : null,
+                'username' => trim((string) $this->smtp_username),
+                'password' => $this->smtpPasswordDecrypted(),
+                'timeout' => 15,
+            ],
+        ]);
+
+        try {
+            Mail::purge($mailerName);
+        } catch (\Throwable) {
+            // Ignorar si la versión de MailManager no requiere purge
+        }
+
+        return $mailerName;
+    }
 
     public function getIdDependenciaAttribute(): int
     {

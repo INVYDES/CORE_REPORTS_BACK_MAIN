@@ -89,6 +89,9 @@ Route::prefix('v1')->group(function () {
         Route::get('empresa', [EmpresaController::class, 'show']);
         Route::put('empresa', [EmpresaController::class, 'update']);
         Route::post('empresa/logo', [EmpresaController::class, 'uploadLogo']);
+        Route::get('empresa/smtp', [EmpresaController::class, 'getSmtp']);
+        Route::put('empresa/smtp', [EmpresaController::class, 'updateSmtp']);
+        Route::post('empresa/smtp/probar', [EmpresaController::class, 'probarSmtp']);
 
         // Las subáreas operativas de una empresa son el recurso `areas`
         Route::apiResource('areas', AreaController::class);

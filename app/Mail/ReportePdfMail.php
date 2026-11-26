@@ -20,18 +20,25 @@ class ReportePdfMail extends Mailable
     public function build(): self
     {
         $folio = $this->reporte->folio ?: 'REP-000';
-        $empresaNombre = $this->reporte->dependencia?->nombre ?: 'CoreReports';
+        $empresa = $this->reporte->dependencia;
+        $empresaNombre = $empresa?->nombre ?: 'CoreReports';
 
-        return $this->subject("Reporte de Servicio [{$folio}] - {$empresaNombre}")
+        $mail = $this->subject("Reporte de Servicio [{$folio}] - {$empresaNombre}")
             ->view('emails.reporte_pdf')
             ->with([
                 'reporte' => $this->reporte,
-                'empresa' => $this->reporte->dependencia,
+                'empresa' => $empresa,
                 'comentario' => $this->comentario,
             ])
             ->attachData($this->pdfContent, "{$folio}.pdf", [
                 'mime' => 'application/pdf',
             ]);
+
+        if ($empresa && $empresa->tieneSmtpConfigurado()) {
+            $mail->from($empresa->smtpFromAddress(), $empresa->smtpFromName());
+        }
+
+        return $mail;
     }
 }
 
