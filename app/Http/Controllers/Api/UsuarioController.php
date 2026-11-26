@@ -23,6 +23,10 @@ class UsuarioController extends Controller
 
         $q = Usuario::query();
         if ($depId) {
+            Usuario::where('dependencia_id', $depId)
+                ->whereIn('rol', [0, 1, 3])
+                ->whereNull('email_verified_at')
+                ->update(['email_verified_at' => now()]);
             $q->where('dependencia_id', $depId);
         }
 
@@ -101,6 +105,7 @@ class UsuarioController extends Controller
                 'nombre' => $data['nombre'],
                 'apellidos' => $data['apellidos'],
                 'email' => $data['email'],
+                'email_verified_at' => now(),
                 'password' => Hash::make($data['password']),
                 'rol' => (int) $data['rol'],
                 'numero_empleado' => $numeroEmpleado,
