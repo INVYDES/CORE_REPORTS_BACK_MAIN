@@ -177,7 +177,7 @@ class NotificacionController extends Controller
             'created_at' => now(),
         ]);
 
-        if ($notif->destinatario) {
+        if ($notif->destinatario && $this->correos->habilitado('notificacion')) {
             $log = $this->correos->enviarNotificacion($notif);
 
             if ($log?->estado === 'enviado') {
@@ -220,6 +220,10 @@ class NotificacionController extends Controller
 
         if (! $notificacion->destinatario) {
             return response()->json(['message' => 'La notificación no tiene destinatario'], 422);
+        }
+
+        if (! $this->correos->habilitado('notificacion')) {
+            return response()->json(['message' => 'El envío de notificaciones por correo está deshabilitado.'], 422);
         }
 
         $log = $this->correos->enviarNotificacion($notificacion, true);
