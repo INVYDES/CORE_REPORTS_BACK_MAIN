@@ -22,6 +22,23 @@ use Illuminate\Support\Facades\Mail;
 
 class CorreoAutomatizadoService
 {
+    /**
+     * Indica si una categoria de correo esta habilitada para envio.
+     */
+    public function habilitado(string $tipo): bool
+    {
+        return in_array($this->categoria($tipo), (array) config('correo.tipos_habilitados', []), true);
+    }
+
+    private function categoria(string $tipo): string
+    {
+        return match (true) {
+            $tipo === 'pago_confirmado' => 'pago',
+            str_starts_with($tipo, 'licencia') => 'licencia',
+            default => $tipo,
+        };
+    }
+
     public function enviarVerificacion(Usuario $usuario, string $codigo, string $enlace, CarbonInterface $expira): ?CorreoLog
     {
         return $this->enviar(
@@ -191,6 +208,10 @@ class CorreoAutomatizadoService
         ?string $clave = null,
         array $metadata = [],
     ): ?CorreoLog {
+        if (! $this->habilitado($tipo)) {
+            return null;
+        }
+
         if (! filter_var($destinatario, FILTER_VALIDATE_EMAIL)) {
             return null;
         }

@@ -3,6 +3,13 @@
 return [
     'verificacion_obligatoria' => (bool) env('CORREO_VERIFICACION_OBLIGATORIA', false),
 
+    // Categorias de correo permitidas. Categorias: verificacion, recuperacion,
+    // licencia, pago, bienvenida, notificacion, reporte.
+    'tipos_habilitados' => array_values(array_filter(array_map(
+        'trim',
+        explode(',', (string) env('CORREO_TIPOS_HABILITADOS', 'verificacion,recuperacion,licencia,pago')),
+    ))),
+
     'codigo_expiracion_minutos' => (int) env('CORREO_CODIGO_EXPIRACION_MINUTOS', 20),
 
     'reenvio_segundos' => (int) env('CORREO_REENVIO_SEGUNDOS', 60),

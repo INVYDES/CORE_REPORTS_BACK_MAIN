@@ -31,6 +31,11 @@ class EnviarNotificacionesPendientes implements ShouldQueue
             return;
         }
 
+        // El envio de notificaciones se delega a un modulo externo.
+        if (! $correos->habilitado('notificacion')) {
+            return;
+        }
+
         Notificacion::query()
             ->where('estatus', 'pendiente')
             ->whereNotNull('destinatario')

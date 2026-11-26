@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Mail\BienvenidaMail;
+use App\Mail\LicenciaPorVencerMail;
 use App\Mail\RecuperarPasswordMail;
 use App\Mail\VerificacionCuentaMail;
 use App\Models\Dependencia;
@@ -173,6 +174,27 @@ class CorreoAutenticacionTest extends TestCase
 
         $this->assertSame('enviado', $segundo->fresh()->estado);
         Mail::assertSent(BienvenidaMail::class);
+    }
+
+    public function test_solo_se_envian_las_categorias_de_correo_habilitadas(): void
+    {
+        Mail::fake();
+        config(['correo.tipos_habilitados' => ['verificacion', 'licencia']]);
+
+        $dependencia = $this->dependencia();
+        $usuario = $this->usuario($dependencia);
+        $dependencia->fecha_expiracion = now()->addDays(3);
+        $servicio = app(CorreoAutomatizadoService::class);
+
+        $this->assertNull($servicio->enviarBienvenida($usuario));
+        $this->assertNull($servicio->enviarRecuperacion($usuario, 'https://creports.corion.mx/reset', 60));
+
+        $log = $servicio->enviarLicenciaPorVencer($dependencia, 3);
+        $this->assertSame('enviado', $log?->estado);
+
+        Mail::assertNotSent(BienvenidaMail::class);
+        Mail::assertNotSent(RecuperarPasswordMail::class);
+        Mail::assertSent(LicenciaPorVencerMail::class);
     }
 
     public function test_enlace_magico_verifica_la_cuenta(): void

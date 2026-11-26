@@ -11,6 +11,7 @@ use App\Models\Reporte;
 use App\Models\Servicio;
 use App\Models\Ticket;
 use App\Models\Usuario;
+use App\Services\CorreoAutomatizadoService;
 use App\Services\InventarioService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -584,17 +585,21 @@ class ReporteController extends Controller
         $correoEnviado = false;
         $correoError = null;
         if ($request->boolean('enviar_correo') && !empty($destinatarios)) {
-            try {
-                $pdfContent = $this->renderPdfObject($reporte)->output();
-                $comentario = $request->input('comentario_correo');
-                Mail::to($destinatarios)->send(new ReportePdfMail($reporte, $pdfContent, $comentario));
-                $correoEnviado = true;
-            } catch (\Throwable $e) {
-                Log::error('Error al enviar correo del reporte: ' . $e->getMessage(), [
-                    'reporte_id' => $reporte->id,
-                    'destinatarios' => $destinatarios,
-                ]);
-                $correoError = $e->getMessage();
+            if (! app(CorreoAutomatizadoService::class)->habilitado('reporte')) {
+                $correoError = 'El envío de reportes por correo está deshabilitado.';
+            } else {
+                try {
+                    $pdfContent = $this->renderPdfObject($reporte)->output();
+                    $comentario = $request->input('comentario_correo');
+                    Mail::to($destinatarios)->send(new ReportePdfMail($reporte, $pdfContent, $comentario));
+                    $correoEnviado = true;
+                } catch (\Throwable $e) {
+                    Log::error('Error al enviar correo del reporte: ' . $e->getMessage(), [
+                        'reporte_id' => $reporte->id,
+                        'destinatarios' => $destinatarios,
+                    ]);
+                    $correoError = $e->getMessage();
+                }
             }
         }
 
@@ -1172,6 +1177,10 @@ class ReporteController extends Controller
 
         if (empty($destinatarios)) {
             return response()->json(['message' => 'Proporciona al menos un correo electrónico válido.'], 422);
+        }
+
+        if (! app(CorreoAutomatizadoService::class)->habilitado('reporte')) {
+            return response()->json(['message' => 'El envío de reportes por correo está deshabilitado.'], 422);
         }
 
         try {
