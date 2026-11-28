@@ -47,6 +47,7 @@ class LicenciaController extends Controller
     private function formatearLicencia(Licencia $licencia, string $origen): array
     {
         return [
+            'id' => (int) $licencia->id,
             'token' => $this->licencias->tokenLicencia($licencia),
             'nombre' => $licencia->nombre,
             'codigo' => $licencia->codigo,

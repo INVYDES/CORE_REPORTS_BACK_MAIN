@@ -249,7 +249,7 @@ class CorreoAutenticacionTest extends TestCase
         $this->assertTrue(Hash::check('NuevaPassword123', $usuario->fresh()->password));
     }
 
-    public function test_catalogo_publico_entrega_tokens_y_no_ids_de_planes(): void
+    public function test_catalogo_publico_entrega_id_y_token_de_planes(): void
     {
         Mail::fake();
         $this->seed(LicenciaCatalogoSeeder::class);
@@ -257,7 +257,8 @@ class CorreoAutenticacionTest extends TestCase
         $response = $this->getJson('/api/v1/licencias/disponibles')->assertOk();
         $plan = $response->json('data.0');
 
-        $this->assertArrayNotHasKey('id', $plan);
+        $this->assertIsInt($plan['id']);
+        $this->assertGreaterThan(0, $plan['id']);
         $this->assertNotEmpty($plan['token']);
 
         $this->postJson('/api/v1/public/register-compania', [

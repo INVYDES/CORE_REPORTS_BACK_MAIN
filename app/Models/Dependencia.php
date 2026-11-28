@@ -44,6 +44,8 @@ class Dependencia extends Model
         'logo_ruta', 'logo_disco', 'trial_usado_at',
         'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username',
         'smtp_password', 'smtp_from_address', 'smtp_from_name', 'smtp_activo',
+        'regimen_fiscal', 'uso_cfdi', 'calle', 'colonia', 'codigo_postal',
+        'ciudad', 'estado', 'municipio', 'metodo_pago', 'forma_pago',
     ];
 
     protected $hidden = [

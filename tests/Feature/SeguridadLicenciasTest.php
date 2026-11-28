@@ -67,6 +67,43 @@ class SeguridadLicenciasTest extends TestCase
         ]);
     }
 
+    public function test_registro_publico_guarda_datos_fiscales_y_de_pago(): void
+    {
+        $this->postJson('/api/v1/public/register-compania', [
+            'companyName' => 'Acme Fiscal',
+            'email' => 'fiscal@acme.com',
+            'password' => 'password123',
+            'firstName' => 'Ana',
+            'lastNamePaternal' => 'Pérez',
+            'rfc' => 'XAXX010101000',
+            'fiscalRegime' => '601',
+            'cfdiUse' => 'G03',
+            'street' => 'Av. Reforma 123',
+            'colony' => 'Centro',
+            'zipCode' => '06000',
+            'city' => 'CDMX',
+            'state' => 'CDMX',
+            'municipality' => 'Cuauhtémoc',
+            'paymentMethod' => 'PUE',
+            'paymentForm' => '03',
+            'licenciaId' => 1,
+        ])->assertStatus(201);
+
+        $dep = Dependencia::where('nombre', 'Acme Fiscal')->firstOrFail();
+
+        $this->assertSame('XAXX010101000', $dep->rfc);
+        $this->assertSame('601', $dep->regimen_fiscal);
+        $this->assertSame('G03', $dep->uso_cfdi);
+        $this->assertSame('Av. Reforma 123', $dep->calle);
+        $this->assertSame('Centro', $dep->colonia);
+        $this->assertSame('06000', $dep->codigo_postal);
+        $this->assertSame('CDMX', $dep->ciudad);
+        $this->assertSame('CDMX', $dep->estado);
+        $this->assertSame('Cuauhtémoc', $dep->municipio);
+        $this->assertSame('PUE', $dep->metodo_pago);
+        $this->assertSame('03', $dep->forma_pago);
+    }
+
     public function test_registro_publico_con_plan_pago_otorga_un_mes_gratis(): void
     {
         $this->seed(LicenciaCatalogoSeeder::class);

@@ -105,16 +105,48 @@ class AuthController extends Controller
             'firstName' => 'required|string|max:100',
             'lastNamePaternal' => 'required|string|max:100',
             'lastNameMaternal' => 'nullable|string|max:100',
+            // Mismo formato que acepta el login por ID de empleado.
+            'numeroEmpleado' => [
+                'nullable',
+                'string',
+                'max:50',
+                'regex:/^(?=.*\d)[A-Za-z0-9][A-Za-z0-9._-]{2,49}$/',
+            ],
             'phone' => 'nullable|string|max:30',
+            'street' => 'nullable|string|max:150',
+            'colony' => 'nullable|string|max:100',
+            'zipCode' => 'nullable|string|max:10',
+            'city' => 'nullable|string|max:100',
+            'state' => 'nullable|string|max:100',
+            'municipality' => 'nullable|string|max:100',
+            'paymentMethod' => 'nullable|string|max:10',
+            'paymentForm' => 'nullable|string|max:10',
             'licenciaToken' => 'nullable|string|max:500',
             'licenciaId' => 'nullable|integer|min:1',
             // Se conserva por compatibilidad con clientes anteriores.
             'planType' => 'nullable|string|max:20',
-        ], [], [
+        ], [
+            'numeroEmpleado.regex' => 'El ID de empleado debe empezar con letra o número, incluir al menos un número y solo usar letras, números, puntos, guiones o guiones bajos.',
+        ], [
             'companyName' => 'nombre de empresa',
             'email' => 'correo',
             'password' => 'contraseña',
+            'numeroEmpleado' => 'ID de empleado',
         ]);
+
+        // El login identifica al usuario por correo o por ID de empleado a nivel
+        // global, así que el ID debe ser único entre todas las empresas.
+        $numeroEmpleado = trim((string) ($data['numeroEmpleado'] ?? ''));
+
+        if ($numeroEmpleado !== '' && Usuario::whereRaw(
+            'LOWER(numero_empleado) = ?',
+            [mb_strtolower($numeroEmpleado)]
+        )->exists()) {
+            return response()->json([
+                'message' => 'Ese ID de empleado ya está en uso. Elige otro.',
+                'errors' => ['numeroEmpleado' => ['Ese ID de empleado ya está en uso. Elige otro.']],
+            ], 422);
+        }
 
         if (! empty($data['licenciaToken'])) {
             $licencia = $this->licencias->resolverTokenLicencia($data['licenciaToken']);
@@ -141,7 +173,7 @@ class AuthController extends Controller
         $maxUsuarios = (int) ($licencia->max_usuarios ?? 2);
         $maxReportes = (int) ($licencia->max_reportes_mensuales ?? 999999);
 
-        $dependencia = DB::transaction(function () use ($data, $licencia, $esGratuito, $tipoDependencia, $maxUsuarios, $maxReportes) {
+        $dependencia = DB::transaction(function () use ($data, $licencia, $esGratuito, $tipoDependencia, $maxUsuarios, $maxReportes, $numeroEmpleado) {
             $dep = Dependencia::create([
                 'nombre' => $data['companyName'],
                 'rfc' => $data['rfc'] ?? null,
@@ -151,6 +183,16 @@ class AuthController extends Controller
                 'limite_reportes_mensuales' => $maxReportes,
                 'correo_contacto' => $data['email'],
                 'telefono' => $data['phone'] ?? null,
+                'regimen_fiscal' => $data['fiscalRegime'] ?? null,
+                'uso_cfdi' => $data['cfdiUse'] ?? null,
+                'calle' => $data['street'] ?? null,
+                'colonia' => $data['colony'] ?? null,
+                'codigo_postal' => $data['zipCode'] ?? null,
+                'ciudad' => $data['city'] ?? null,
+                'estado' => $data['state'] ?? null,
+                'municipio' => $data['municipality'] ?? null,
+                'metodo_pago' => $data['paymentMethod'] ?? null,
+                'forma_pago' => $data['paymentForm'] ?? null,
                 'activa' => true,
                 // El plan gratuito no consume el mes de prueba de los planes de pago.
                 'trial_usado_at' => null,
@@ -164,7 +206,8 @@ class AuthController extends Controller
 
             $user = Usuario::create([
                 'dependencia_id' => $dep->id,
-                'numero_empleado' => 'ADM-001',
+                // Si el cliente no envía ID se genera uno derivado del id de la empresa.
+                'numero_empleado' => $numeroEmpleado !== '' ? $numeroEmpleado : 'ADM-'.$dep->id,
                 'rol' => 2, // Admin comercial: fijo, nunca del input
                 'nombre' => $data['firstName'],
                 'apellidos' => trim(($data['lastNamePaternal'] ?? '').' '.($data['lastNameMaternal'] ?? '')),
@@ -215,6 +258,7 @@ class AuthController extends Controller
     private function formatearLicencia(Licencia $licencia): array
     {
         return [
+            'id' => (int) $licencia->id,
             'token' => $this->licencias->tokenLicencia($licencia),
             'nombre' => $licencia->nombre,
             'codigo' => $licencia->codigo,
