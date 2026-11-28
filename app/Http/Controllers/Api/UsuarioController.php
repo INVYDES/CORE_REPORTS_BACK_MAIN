@@ -5,13 +5,12 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Dependencia;
 use App\Models\Usuario;
-use App\Rules\NumeroEmpleadoUnico;
 use App\Traits\EnsuresDependencia;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Validation\Rules\Password;
+use Illuminate\Support\Facades\Schema;
 
 class UsuarioController extends Controller
 {
@@ -67,7 +66,24 @@ class UsuarioController extends Controller
                 'email' => 'required|email|unique:usuarios,email',
                 'password' => ['required', 'string', 'min:6'],
                 'rol' => 'required|integer|in:0,1,2,3',
-                'numero_empleado' => ['nullable', 'string', 'max:50', 'regex:/^(?=.*\d)[A-Za-z0-9][A-Za-z0-9._-]{2,49}$/', new NumeroEmpleadoUnico()],
+                'numero_empleado' => [
+                    'nullable',
+                    'string',
+                    'max:50',
+                    'regex:/^(?=.*\d)[A-Za-z0-9][A-Za-z0-9._-]{2,49}$/',
+                    function (string $attribute, mixed $value, \Closure $fail): void {
+                        $numero = trim((string) $value);
+                        if ($numero === '') {
+                            return;
+                        }
+                        $existe = Usuario::withTrashed()
+                            ->whereRaw('LOWER(numero_empleado) = ?', [mb_strtolower($numero)])
+                            ->exists();
+                        if ($existe) {
+                            $fail('Ese ID de empleado ya está en uso. Elige otro.');
+                        }
+                    },
+                ],
             ], ['numero_empleado.regex' => 'El ID de empleado debe empezar con letra o número, incluir al menos un número y solo usar letras, números, puntos, guiones o guiones bajos.']);
 
             // Obtener la dependencia de manera segura
@@ -155,9 +171,11 @@ class UsuarioController extends Controller
                 return response()->json(['message' => 'No autenticado.'], 401);
             }
 
-            // Usuario no tiene global scope por dependencia: la policy impide
-            // modificar cuentas de otras empresas.
-            if ($user->cannot('update', $usuario)) {
+            // Usuario no tiene global scope por dependencia: impedir modificar cuentas de otras empresas.
+            if (
+                (! $user->isAdminTec() && ! $user->isAdminCom()) ||
+                (int) $usuario->dependencia_id !== (int) $user->dependencia_id
+            ) {
                 return response()->json(['message' => 'No tienes permisos para modificar este usuario.'], 403);
             }
 
@@ -177,14 +195,24 @@ class UsuarioController extends Controller
                     // nuevo si cambia, para no bloquear la edición de IDs antiguos.
                     function (string $attribute, mixed $value, \Closure $fail) use ($usuario): void {
                         $nuevo = trim((string) $value);
-                        if ($nuevo === '' || $nuevo === trim((string) $usuario->numero_empleado)) {
+                        if ($nuevo === '') {
                             return;
                         }
-                        if (! preg_match('/^(?=.*\d)[A-Za-z0-9][A-Za-z0-9._-]{2,49}$/', $nuevo)) {
-                            $fail('El ID de empleado debe empezar con letra o número, incluir al menos un número y solo usar letras, números, puntos, guiones o guiones bajos.');
+                        if ($nuevo !== trim((string) $usuario->numero_empleado)) {
+                            if (! preg_match('/^(?=.*\d)[A-Za-z0-9][A-Za-z0-9._-]{2,49}$/', $nuevo)) {
+                                $fail('El ID de empleado debe empezar con letra o número, incluir al menos un número y solo usar letras, números, puntos, guiones o guiones bajos.');
+
+                                return;
+                            }
+                        }
+                        $existe = Usuario::withTrashed()
+                            ->whereRaw('LOWER(numero_empleado) = ?', [mb_strtolower($nuevo)])
+                            ->whereKeyNot($usuario->id)
+                            ->exists();
+                        if ($existe) {
+                            $fail('Ese ID de empleado ya está en uso. Elige otro.');
                         }
                     },
-                    new NumeroEmpleadoUnico($usuario->id),
                 ],
             ]);
 
@@ -200,13 +228,17 @@ class UsuarioController extends Controller
                 }
             }
 
-            if (array_key_exists('email', $data) && $data['email'] !== $usuario->email) {
+            $tieneColumnaVerificado = Schema::hasColumn('usuarios', 'email_verified_at');
+
+            if (array_key_exists('email', $data) && $data['email'] !== $usuario->email && $tieneColumnaVerificado) {
                 $data['email_verified_at'] = $usuario->email_verified_at ?? now();
             }
 
             if (! empty($data['password'])) {
                 $data['password'] = Hash::make($data['password']);
-                $data['email_verified_at'] = $usuario->email_verified_at ?? now();
+                if ($tieneColumnaVerificado) {
+                    $data['email_verified_at'] = $usuario->email_verified_at ?? now();
+                }
             } else {
                 unset($data['password']);
             }
@@ -241,7 +273,10 @@ class UsuarioController extends Controller
                 return response()->json(['message' => 'No puedes eliminar tu propia cuenta.'], 422);
             }
 
-            if ($user->cannot('delete', $usuario)) {
+            if (
+                (! $user->isAdminTec() && ! $user->isAdminCom()) ||
+                (int) $usuario->dependencia_id !== (int) $user->dependencia_id
+            ) {
                 return response()->json(['message' => 'No tienes permisos para eliminar este usuario.'], 403);
             }
 
