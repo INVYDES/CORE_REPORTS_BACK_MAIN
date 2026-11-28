@@ -439,6 +439,9 @@ class ReporteController extends Controller
         $data['reporte_origen_id'] = $this->resolveFk($request, 'reporte_origen_id', Reporte::class);
 
         $ejecutores = $this->resolveUserIds($request, 'ejecutores');
+        if (empty($ejecutores) && $user) {
+            $ejecutores = [(int) $user->id];
+        }
         unset($data['ejecutores'], $data['materiales'], $data['evidencias'], $data['evidenciaFotografica']);
 
         if ($data['tipo'] === 'libre') {
@@ -731,6 +734,9 @@ class ReporteController extends Controller
 
             if ($request->boolean('sync_ejecutores') || $request->has('ejecutores')) {
                 $ejecutores = $this->resolveUserIds($request, 'ejecutores');
+                if (empty($ejecutores) && $user) {
+                    $ejecutores = [(int) $user->id];
+                }
                 $reporte->ejecutores()->delete();
                 foreach ($ejecutores as $uid) {
                     $reporte->ejecutores()->create([
