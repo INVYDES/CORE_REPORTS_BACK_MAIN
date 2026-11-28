@@ -33,7 +33,7 @@ class EmpresaApiTest extends TestCase
     {
         return Usuario::create([
             'dependencia_id' => $dep->id,
-            'numero_empleado' => 'EMP-001',
+            'numero_empleado' => null,
             'rol' => $rol,
             'nombre' => 'Admin',
             'apellidos' => 'Test',

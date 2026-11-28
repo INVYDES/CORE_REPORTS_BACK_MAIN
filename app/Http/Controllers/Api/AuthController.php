@@ -126,19 +126,46 @@ class AuthController extends Controller
             // Se conserva por compatibilidad con clientes anteriores.
             'planType' => 'nullable|string|max:20',
         ], [
+            'required' => 'El campo :attribute es obligatorio.',
+            'string' => 'El campo :attribute debe ser texto.',
+            'max' => 'El campo :attribute no debe tener más de :max caracteres.',
+            'email' => 'El campo :attribute debe ser un correo electrónico válido.',
+            'unique' => 'El campo :attribute ya está registrado.',
+            'integer' => 'El campo :attribute debe ser un número entero.',
+            'min' => 'El campo :attribute debe ser como mínimo :min.',
+            'password.min' => 'La contraseña debe tener al menos :min caracteres.',
+            'password.string' => 'La contraseña debe ser texto.',
             'numeroEmpleado.regex' => 'El ID de empleado debe empezar con letra o número, incluir al menos un número y solo usar letras, números, puntos, guiones o guiones bajos.',
         ], [
             'companyName' => 'nombre de empresa',
             'email' => 'correo',
             'password' => 'contraseña',
             'numeroEmpleado' => 'ID de empleado',
+            'rfc' => 'RFC',
+            'fiscalRegime' => 'régimen fiscal',
+            'cfdiUse' => 'uso de CFDI',
+            'firstName' => 'nombre(s)',
+            'lastNamePaternal' => 'apellido paterno',
+            'lastNameMaternal' => 'apellido materno',
+            'phone' => 'teléfono',
+            'street' => 'calle y número',
+            'colony' => 'colonia',
+            'zipCode' => 'código postal',
+            'city' => 'ciudad',
+            'state' => 'estado',
+            'municipality' => 'municipio/alcaldía',
+            'paymentMethod' => 'método de pago',
+            'paymentForm' => 'forma de pago',
+            'licenciaToken' => 'plan',
+            'licenciaId' => 'plan',
+            'planType' => 'plan',
         ]);
 
         // El login identifica al usuario por correo o por ID de empleado a nivel
         // global, así que el ID debe ser único entre todas las empresas.
         $numeroEmpleado = trim((string) ($data['numeroEmpleado'] ?? ''));
 
-        if ($numeroEmpleado !== '' && Usuario::whereRaw(
+        if ($numeroEmpleado !== '' && Usuario::withTrashed()->whereRaw(
             'LOWER(numero_empleado) = ?',
             [mb_strtolower($numeroEmpleado)]
         )->exists()) {
