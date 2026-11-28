@@ -201,11 +201,12 @@ class UsuarioController extends Controller
             }
 
             if (array_key_exists('email', $data) && $data['email'] !== $usuario->email) {
-                $data['email_verified_at'] = null;
+                $data['email_verified_at'] = $usuario->email_verified_at ?? now();
             }
 
             if (! empty($data['password'])) {
                 $data['password'] = Hash::make($data['password']);
+                $data['email_verified_at'] = $usuario->email_verified_at ?? now();
             } else {
                 unset($data['password']);
             }

@@ -225,10 +225,21 @@ class AuthController extends Controller
                 $this->licencias->iniciarPruebaLicencia($dep, $licencia, 'registro');
             }
 
+            $empleadoId = $numeroEmpleado;
+            if ($empleadoId === '') {
+                $baseId = 'ADM-'.$dep->id;
+                $empleadoId = $baseId;
+                $sufijo = 2;
+                while (Usuario::withTrashed()->whereRaw('LOWER(numero_empleado) = ?', [mb_strtolower($empleadoId)])->exists()) {
+                    $empleadoId = $baseId.'-'.$sufijo;
+                    $sufijo++;
+                }
+            }
+
             $user = Usuario::create([
                 'dependencia_id' => $dep->id,
                 // Si el cliente no envía ID se genera uno derivado del id de la empresa.
-                'numero_empleado' => $numeroEmpleado !== '' ? $numeroEmpleado : 'ADM-'.$dep->id,
+                'numero_empleado' => $empleadoId,
                 'rol' => 2, // Admin comercial: fijo, nunca del input
                 'nombre' => $data['firstName'],
                 'apellidos' => trim(($data['lastNamePaternal'] ?? '').' '.($data['lastNameMaternal'] ?? '')),
