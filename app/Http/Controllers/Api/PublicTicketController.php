@@ -37,36 +37,40 @@ class PublicTicketController extends Controller
     {
         $clean = strtolower(trim($slug));
 
+        $dep = null;
+
         // 1. Si existe columna 'slug' en dependencias
-        if (Schema::hasColumn('dependencias', 'slug')) {
+        if ($clean !== '' && Schema::hasColumn('dependencias', 'slug')) {
             $dep = Dependencia::withoutGlobalScopes()->where('slug', $clean)->first();
-            if ($dep) {
-                return $dep;
+        }
+
+        // 2. Buscar por coincidencia con Str::slug(nombre) o nombre en minúsculas.
+        // No se acepta el ID numérico: permitiría recorrer todas las empresas.
+        if (! $dep && $clean !== '') {
+            foreach (Dependencia::withoutGlobalScopes()->select(['id', 'nombre'])->lazyById(200) as $d) {
+                $candidateSlug = Str::slug($d->nombre);
+                if ($candidateSlug === $clean || mb_strtolower((string) $d->nombre) === $clean) {
+                    $dep = Dependencia::withoutGlobalScopes()->find($d->id);
+                    break;
+                }
             }
         }
 
-        // 2. Si es ID numérico directo
-        if (is_numeric($clean)) {
-            $dep = Dependencia::withoutGlobalScopes()->find((int) $clean);
-            if ($dep) {
-                return $dep;
-            }
+        // Empresas desactivadas o con licencia vencida no reciben tickets públicos.
+        $vencida = $dep?->fecha_expiracion && now()->startOfDay()->gt($dep->fecha_expiracion->copy()->endOfDay());
+        if (! $dep || ! $dep->activa || $vencida) {
+            abort(404, 'Empresa no encontrada.');
         }
 
-        // 3. Buscar por coincidencia con Str::slug(nombre) o nombre en minúsculas
-        $todas = Dependencia::withoutGlobalScopes()->get();
-        foreach ($todas as $d) {
-            $candidateSlug = Str::slug($d->nombre);
-            if ($candidateSlug === $clean || strtolower((string) $d->nombre) === $clean) {
-                return $d;
-            }
-        }
-
-        abort(404, 'Empresa no encontrada.');
+        return $dep;
     }
 
     private function generarFolioSecuencial(int $dependenciaId): string
     {
+        // Bloquea la fila de la empresa (dentro de la transacción del alta) para
+        // que dos altas simultáneas no calculen el mismo consecutivo.
+        \App\Models\Dependencia::withoutGlobalScopes()->whereKey($dependenciaId)->lockForUpdate()->first();
+
         $ahora = now('America/Mexico_City');
         $prefijo = 'TKT-'.$ahora->format('ymd');
         $prefijoLegacy = 'TKT-'.$ahora->format('Ymd');
@@ -148,7 +152,8 @@ class PublicTicketController extends Controller
             'descripcion' => 'required|string|max:3000',
             'prioridad' => 'nullable|in:baja,media,alta',
             'evidencias' => 'nullable|array|max:3',
-            'evidencias.*' => 'nullable|string', // Imágenes en Base64
+            // Imágenes en Base64: ~5 MB por imagen como máximo.
+            'evidencias.*' => 'nullable|string|max:7000000',
         ]);
 
         $lugar = trim($data['lugar']);
@@ -226,20 +231,22 @@ class PublicTicketController extends Controller
         // Crear notificación interna para administradores y coordinadores de la empresa
         try {
             $usuariosNotificar = Usuario::where('dependencia_id', $depId)
-                ->whereIn('rol', ['admin', 'administrador', 'supervisor', 'coordinador'])
+                ->whereIn('rol', [Usuario::ROLE_ADMIN_TEC, Usuario::ROLE_ADMIN_COM])
+                ->where('estado', true)
                 ->get();
 
             foreach ($usuariosNotificar as $u) {
                 Notificacion::create([
                     'dependencia_id' => $depId,
                     'usuario_id' => $u->id,
+                    'destinatario' => $u->email,
                     'tipo' => 'ticket_nuevo_cliente',
                     'titulo' => "Nuevo Ticket de Cliente: {$ticket->folio}",
                     'asunto' => "Nuevo reporte en {$lugar} levantado por {$solicitante}",
                     'cuerpo' => "El cliente en {$lugar} reportó: '{$asuntoBase}'. Folio: {$ticket->folio}",
                     'referencia_tipo' => 'ticket',
                     'referencia_id' => $ticket->id,
-                    'estatus' => 'no_leida',
+                    'estatus' => 'pendiente',
                 ]);
             }
         } catch (\Throwable $t) {

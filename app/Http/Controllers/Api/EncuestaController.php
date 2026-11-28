@@ -24,7 +24,7 @@ class EncuestaController extends Controller
             $q->where('calificacion', (int) $request->calificacion);
         }
 
-        return response()->json($q->orderByDesc('created_at')->paginate(min((int) $request->get('per_page', 15), 100)));
+        return response()->json($q->orderByDesc('created_at')->paginate(min(max((int) $request->get('per_page', 15), 1), 100)));
     }
 
     public function store(Request $request): JsonResponse

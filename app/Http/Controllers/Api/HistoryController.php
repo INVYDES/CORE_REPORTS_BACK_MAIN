@@ -17,7 +17,7 @@ class HistoryController extends Controller
         $from = $request->query('from');
         $to = $request->query('to');
         $tipo = $request->query('tipo'); // ticket|servicio|reporte
-        $limit = (int) $request->query('per_page', 50);
+        $limit = min(max((int) $request->query('per_page', 50), 1), 200);
 
         $tickets = collect();
         $servicios = collect();

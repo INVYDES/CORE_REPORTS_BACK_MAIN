@@ -165,6 +165,27 @@ class EmpresaController extends Controller
                 ], 404);
             }
 
+            // El formulario reenvía todos los campos: solo se validan los correos
+            // que cambian, para no bloquear el guardado por un valor antiguo.
+            $reglas = [];
+            foreach (['correoContacto' => 'correo_contacto', 'correo_contacto' => 'correo_contacto',
+                'correoReportes' => 'correo_reportes', 'correo_reportes' => 'correo_reportes'] as $campo => $columna) {
+                if ($request->has($campo)
+                    && trim((string) $request->input($campo)) !== trim((string) $empresa->{$columna})) {
+                    $reglas[$campo] = 'nullable|email|max:150';
+                }
+            }
+            $validator = Validator::make($request->all(), $reglas, [
+                'email' => 'El campo :attribute debe ser un correo electrónico válido.',
+            ]);
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $validator->errors()->first(),
+                    'errors' => $validator->errors(),
+                ], 422);
+            }
+
             // Actualizar campos comerciales y de contacto con seguridad
             $nombreInput = $request->input('nombre');
             if (! empty($nombreInput) && is_string($nombreInput)) {

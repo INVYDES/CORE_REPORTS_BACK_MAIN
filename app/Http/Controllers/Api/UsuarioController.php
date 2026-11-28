@@ -5,12 +5,12 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Dependencia;
 use App\Models\Usuario;
+use App\Rules\NumeroEmpleadoUnico;
 use App\Traits\EnsuresDependencia;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
 
 class UsuarioController extends Controller
@@ -24,10 +24,6 @@ class UsuarioController extends Controller
 
         $q = Usuario::query();
         if ($depId) {
-            Usuario::where('dependencia_id', $depId)
-                ->whereIn('rol', [0, 1, 3])
-                ->whereNull('email_verified_at')
-                ->update(['email_verified_at' => now()]);
             $q->where('dependencia_id', $depId);
         }
 
@@ -45,7 +41,7 @@ class UsuarioController extends Controller
                 ->orWhere('email', 'like', "%{$s}%"));
         }
 
-        return response()->json($q->orderBy('nombre')->paginate(min((int) $request->get('per_page', 15), 100)));
+        return response()->json($q->orderBy('nombre')->paginate(min(max((int) $request->get('per_page', 15), 1), 100)));
     }
 
     public function store(Request $request): JsonResponse
@@ -61,17 +57,21 @@ class UsuarioController extends Controller
                 return response()->json(['message' => 'No tienes permisos para crear usuarios.'], 403);
             }
 
+            if (! $user->dependencia_id) {
+                return response()->json(['message' => 'Tu cuenta no pertenece a ninguna empresa.'], 422);
+            }
+
             $data = $request->validate([
                 'nombre' => 'required|string|max:100',
                 'apellidos' => 'required|string|max:100',
                 'email' => 'required|email|unique:usuarios,email',
                 'password' => ['required', 'string', 'min:6'],
                 'rol' => 'required|integer|in:0,1,2,3',
-                'numero_empleado' => 'nullable|string|max:50|unique:usuarios,numero_empleado',
-            ]);
+                'numero_empleado' => ['nullable', 'string', 'max:50', 'regex:/^(?=.*\d)[A-Za-z0-9][A-Za-z0-9._-]{2,49}$/', new NumeroEmpleadoUnico()],
+            ], ['numero_empleado.regex' => 'El ID de empleado debe empezar con letra o número, incluir al menos un número y solo usar letras, números, puntos, guiones o guiones bajos.']);
 
             // Obtener la dependencia de manera segura
-            $depId = $user->dependencia_id ?? 1;
+            $depId = (int) $user->dependencia_id;
             $dep = $user->dependencia ?? Dependencia::find($depId);
 
             // Validar límite si la empresa tiene límite configurado
@@ -99,7 +99,14 @@ class UsuarioController extends Controller
                         $maxNum = $val;
                     }
                 }
-                $numeroEmpleado = $prefix . str_pad((string) ($maxNum + 1), 3, '0', STR_PAD_LEFT);
+                // El ID se usa para iniciar sesión: debe ser único entre todas las
+                // empresas (p. ej. EMP-1 + 1001 y EMP-11 + 001 coinciden).
+                do {
+                    $maxNum++;
+                    $numeroEmpleado = $prefix . str_pad((string) $maxNum, 3, '0', STR_PAD_LEFT);
+                } while (Usuario::withTrashed()
+                    ->whereRaw('LOWER(numero_empleado) = ?', [mb_strtolower($numeroEmpleado)])
+                    ->exists());
             }
 
             $usuario = Usuario::create([
@@ -127,7 +134,7 @@ class UsuarioController extends Controller
             ]);
 
             return response()->json([
-                'message' => 'Error al crear usuario: ' . $e->getMessage(),
+                'message' => 'Error al crear usuario. Intenta de nuevo.',
             ], 500);
         }
     }
@@ -148,8 +155,10 @@ class UsuarioController extends Controller
                 return response()->json(['message' => 'No autenticado.'], 401);
             }
 
-            if (! $user->isAdminTec() && ! $user->isAdminCom()) {
-                return response()->json(['message' => 'No tienes permisos para modificar usuarios.'], 403);
+            // Usuario no tiene global scope por dependencia: la policy impide
+            // modificar cuentas de otras empresas.
+            if ($user->cannot('update', $usuario)) {
+                return response()->json(['message' => 'No tienes permisos para modificar este usuario.'], 403);
             }
 
             $data = $request->validate([
@@ -164,7 +173,18 @@ class UsuarioController extends Controller
                     'nullable',
                     'string',
                     'max:50',
-                    Rule::unique('usuarios', 'numero_empleado')->ignore($usuario->id),
+                    // El formulario reenvía el ID actual: solo se exige el formato
+                    // nuevo si cambia, para no bloquear la edición de IDs antiguos.
+                    function (string $attribute, mixed $value, \Closure $fail) use ($usuario): void {
+                        $nuevo = trim((string) $value);
+                        if ($nuevo === '' || $nuevo === trim((string) $usuario->numero_empleado)) {
+                            return;
+                        }
+                        if (! preg_match('/^(?=.*\d)[A-Za-z0-9][A-Za-z0-9._-]{2,49}$/', $nuevo)) {
+                            $fail('El ID de empleado debe empezar con letra o número, incluir al menos un número y solo usar letras, números, puntos, guiones o guiones bajos.');
+                        }
+                    },
+                    new NumeroEmpleadoUnico($usuario->id),
                 ],
             ]);
 
@@ -202,7 +222,7 @@ class UsuarioController extends Controller
             Log::error('Error al actualizar usuario: ' . $e->getMessage());
 
             return response()->json([
-                'message' => 'Error al actualizar usuario: ' . $e->getMessage(),
+                'message' => 'Error al actualizar usuario. Intenta de nuevo.',
             ], 500);
         }
     }
@@ -212,19 +232,25 @@ class UsuarioController extends Controller
         try {
             $user = request()->user() ?? auth('sanctum')->user() ?? auth()->user();
 
-            if (! $user || (! $user->isAdminTec() && ! $user->isAdminCom())) {
-                return response()->json(['message' => 'No tienes permisos para eliminar usuarios.'], 403);
+            if (! $user) {
+                return response()->json(['message' => 'No autenticado.'], 401);
             }
 
             if ($usuario->id === $user->id) {
                 return response()->json(['message' => 'No puedes eliminar tu propia cuenta.'], 422);
             }
 
+            if ($user->cannot('delete', $usuario)) {
+                return response()->json(['message' => 'No tienes permisos para eliminar este usuario.'], 403);
+            }
+
             $usuario->delete();
 
             return response()->json(['message' => 'deleted']);
         } catch (\Throwable $e) {
-            return response()->json(['message' => 'Error al eliminar usuario: ' . $e->getMessage()], 500);
+            Log::error('Error al eliminar usuario: ' . $e->getMessage());
+
+            return response()->json(['message' => 'Error al eliminar usuario. Intenta de nuevo.'], 500);
         }
     }
 }

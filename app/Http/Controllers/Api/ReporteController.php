@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Mail\ReportePdfMail;
 use App\Models\Area;
+use App\Models\Dependencia;
 use App\Models\Equipo;
 use App\Models\MaterialCatalogo;
 use App\Models\Reporte;
@@ -93,6 +94,10 @@ class ReporteController extends Controller
 
     private function generarFolioSecuencial(int $dependenciaId): string
     {
+        // Bloquea la fila de la empresa (dentro de la transacción del alta) para
+        // que dos altas simultáneas no calculen el mismo consecutivo.
+        \App\Models\Dependencia::withoutGlobalScopes()->whereKey($dependenciaId)->lockForUpdate()->first();
+
         $ahora = now('America/Mexico_City');
         $prefijo = 'REP-'.$ahora->format('ymd');
         $prefijoLegacy = 'REP-'.$ahora->format('Ymd');
@@ -165,7 +170,7 @@ class ReporteController extends Controller
     public function index(Request $request): JsonResponse
     {
         $user = $request->user() ?? auth()->user();
-        if ($user && isset($user->dependencia_id)) {
+        if ($user && isset($user->dependencia_id) && (int) $request->get('page', 1) <= 1) {
             try {
                 DB::table('reportes')
                     ->where('dependencia_id', (int) $user->dependencia_id)
@@ -178,10 +183,23 @@ class ReporteController extends Controller
             }
         }
 
+        $perPage = min(max((int) $request->get('per_page', 15), 1), 100);
+
+        // ligero=1: solo los campos para cruzar reportes con tickets/servicios,
+        // sin relaciones. Las listas lo usan para saber qué origen está resuelto.
+        if ($request->boolean('ligero')) {
+            return response()->json(
+                $this->filteredQuery($request)
+                    ->select(['id', 'folio', 'tipo', 'ticket_id', 'servicio_id', 'estatus', 'fecha_inicio'])
+                    ->orderByDesc('fecha_inicio')->orderByDesc('id')
+                    ->paginate($perPage)
+            );
+        }
+
         $q = $this->filteredQuery($request)
             ->with(['creador', 'responsable', 'ticket', 'servicio', 'ejecutores.usuario', 'materiales.material']);
 
-        return response()->json($q->orderByDesc('fecha_inicio')->paginate(min((int) $request->get('per_page', 15), 100)));
+        return response()->json($q->orderByDesc('fecha_inicio')->orderByDesc('id')->paginate($perPage));
     }
 
     public function export(Request $request): Response
@@ -335,7 +353,7 @@ class ReporteController extends Controller
             $this->authorize('create', Reporte::class);
 
         $data = $request->validate([
-            'folio' => 'sometimes|nullable|string|max:50',
+            'folio' => ['sometimes', 'nullable', 'string', 'max:50', 'regex:~^[A-Za-z0-9][A-Za-z0-9._/-]*$~'],
             'tipo' => 'required|in:ticket,servicio,libre',
             'ticket_id' => 'nullable|integer',
             'servicio_id' => 'nullable|integer',
@@ -388,7 +406,11 @@ class ReporteController extends Controller
                         }
 
                         $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
-                        if (! filter_var($url, FILTER_VALIDATE_URL) || ! in_array($scheme, ['http', 'https'], true)) {
+                        // FILTER_VALIDATE_URL acepta comillas y < >: se rechazan para que la
+                        // URL no pueda romper atributos HTML al mostrarse o imprimirse.
+                        if (! filter_var($url, FILTER_VALIDATE_URL)
+                            || ! in_array($scheme, ['http', 'https'], true)
+                            || preg_match('/[\x00-\x20"\'<>\x5c`]/', $url)) {
                             $fail('La evidencia debe ser una URL válida o una imagen en base64.');
 
                             return;
@@ -634,9 +656,7 @@ class ReporteController extends Controller
 
         return response()->json([
             'success' => false,
-            'message' => 'Error al guardar reporte: ' . $e->getMessage(),
-            'file' => $e->getFile(),
-            'line' => $e->getLine(),
+            'message' => 'Error al guardar reporte. Intenta de nuevo.',
         ], 500);
     }
 }
@@ -660,9 +680,7 @@ class ReporteController extends Controller
             ]);
 
             return response()->json([
-                'message' => 'Error al cargar reporte: ' . $e->getMessage(),
-                'file' => $e->getFile(),
-                'line' => $e->getLine(),
+                'message' => 'Error al cargar reporte. Intenta de nuevo.',
             ], 500);
         }
     }
@@ -1166,7 +1184,7 @@ class ReporteController extends Controller
                 return $nativePdf->download($reporte->folio.'.pdf');
             } catch (\Throwable $e2) {
                 Log::error('ReportePdfService también falló: '.$e2->getMessage());
-                abort(500, 'Error al generar el PDF: '.$e->getMessage());
+                abort(500, 'Error al generar el PDF.');
             }
         }
     }
@@ -1228,7 +1246,7 @@ class ReporteController extends Controller
             ]);
 
             return response()->json([
-                'message' => 'No se pudo enviar el correo: ' . $e->getMessage(),
+                'message' => 'No se pudo enviar el correo. Revisa la configuración SMTP de tu empresa.',
             ], 500);
         }
     }

@@ -29,7 +29,7 @@ class MaterialController extends Controller
             $q->whereColumn('stock_actual', '<=', 'stock_minimo');
         }
 
-        return response()->json($q->orderBy('nombre')->paginate(min((int) $request->get('per_page', 15), 100)));
+        return response()->json($q->orderBy('nombre')->paginate(min(max((int) $request->get('per_page', 15), 1), 100)));
     }
 
     public function store(Request $request): JsonResponse
@@ -117,6 +117,6 @@ class MaterialController extends Controller
             $q->where('tipo', $request->string('tipo'));
         }
 
-        return response()->json($q->orderByDesc('created_at')->paginate(min((int) $request->get('per_page', 20), 100)));
+        return response()->json($q->orderByDesc('created_at')->paginate(min(max((int) $request->get('per_page', 20), 1), 100)));
     }
 }

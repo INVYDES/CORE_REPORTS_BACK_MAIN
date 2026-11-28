@@ -16,7 +16,7 @@ class DependenciaController extends Controller
     public function index(Request $request): JsonResponse
     {
         return response()->json(
-            Dependencia::where('id', $this->usuario($request)->dependencia_id)->paginate(min((int) $request->get('per_page', 15), 100))
+            Dependencia::where('id', $this->usuario($request)->dependencia_id)->paginate(min(max((int) $request->get('per_page', 15), 1), 100))
         );
     }
 

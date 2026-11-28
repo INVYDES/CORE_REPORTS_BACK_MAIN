@@ -54,6 +54,10 @@ class TicketController extends Controller
 
     private function generarFolioSecuencial(int $dependenciaId): string
     {
+        // Bloquea la fila de la empresa (dentro de la transacción del alta) para
+        // que dos altas simultáneas no calculen el mismo consecutivo.
+        \App\Models\Dependencia::withoutGlobalScopes()->whereKey($dependenciaId)->lockForUpdate()->first();
+
         $ahora = now('America/Mexico_City');
         $prefijo = 'TKT-'.$ahora->format('ymd');
         $prefijoLegacy = 'TKT-'.$ahora->format('Ymd');
@@ -110,7 +114,9 @@ class TicketController extends Controller
     public function index(Request $request): JsonResponse
     {
         $user = $request->user() ?? auth()->user();
-        if ($user && isset($user->dependencia_id)) {
+        // La sincronización hace UPDATEs: solo en la primera página, no en cada
+        // página cuando el front recorre el listado completo.
+        if ($user && isset($user->dependencia_id) && (int) $request->get('page', 1) <= 1) {
             $this->sincronizarTicketsConReportesFinalizados((int) $user->dependencia_id);
         }
 
@@ -145,13 +151,15 @@ class TicketController extends Controller
                 ->orWhere('asunto', 'like', "%{$s}%"));
         }
 
-        return response()->json($q->orderByDesc('fecha_solicitud')->paginate(min((int) $request->get('per_page', 15), 100)));
+        // id como desempate: con fechas repetidas el orden no es estable y la
+        // paginación por offset repetía u omitía registros entre páginas.
+        return response()->json($q->orderByDesc('fecha_solicitud')->orderByDesc('id')->paginate(min(max((int) $request->get('per_page', 15), 1), 100)));
     }
 
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'folio' => 'sometimes|nullable|string|max:50',
+            'folio' => ['sometimes', 'nullable', 'string', 'max:50', 'regex:~^[A-Za-z0-9][A-Za-z0-9._/-]*$~'],
             'asunto' => 'required|string|max:200',
             'descripcion' => 'nullable|string',
             'solicitante' => 'nullable|string|max:150',
@@ -367,7 +375,7 @@ class TicketController extends Controller
             return response()->json([
                 'ok' => false,
                 'success' => false,
-                'message' => 'Error al obtener técnicos: ' . $e->getMessage(),
+                'message' => 'Error al obtener técnicos.',
             ], 500);
         }
     }

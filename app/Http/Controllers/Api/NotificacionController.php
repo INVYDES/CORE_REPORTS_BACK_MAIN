@@ -40,9 +40,10 @@ class NotificacionController extends Controller
         if ($request->filled('referencia_tipo')) {
             $q->where('referencia_tipo', $request->string('referencia_tipo'));
         }
-        if ($request->filled('usuario_id')) {
+        $esTecnico = $user && $user->rol === 3;
+        if ($request->filled('usuario_id') && ! $esTecnico) {
             $q->where('usuario_id', (int) $request->get('usuario_id'));
-        } elseif ($user && $user->rol === 3) {
+        } elseif ($esTecnico) {
             // Técnicos solo ven notificaciones dirigidas a ellos (por usuario_id o por email de destinatario) o broadcast
             $q->where(function ($sub) use ($user) {
                 $sub->where('usuario_id', $user->id)
@@ -77,7 +78,7 @@ class NotificacionController extends Controller
 
         $noLeidas = (clone $q)->whereNull('leida_at')->count();
 
-        $paginator = $q->orderByDesc('created_at')->paginate(min((int) $request->get('per_page', 15), 100));
+        $paginator = $q->orderByDesc('created_at')->paginate(min(max((int) $request->get('per_page', 15), 1), 100));
         $this->attachReferenciaContext($paginator->getCollection());
 
         $payload = $paginator->toArray();
@@ -169,6 +170,20 @@ class NotificacionController extends Controller
 
         if (empty($data['destinatario']) && ! empty($data['usuario_id'])) {
             $data['destinatario'] = Usuario::find((int) $data['usuario_id'])?->email;
+        }
+
+        // El destinatario debe ser un usuario de la propia dependencia: el
+        // endpoint no puede usarse para enviar correos a direcciones arbitrarias.
+        if (! empty($data['destinatario'])) {
+            $depId = $this->usuarioActual()->dependencia_id;
+            $destinatarioValido = Usuario::where('dependencia_id', $depId)
+                ->whereRaw('LOWER(email) = ?', [mb_strtolower(trim((string) $data['destinatario']))])
+                ->when(! empty($data['usuario_id']), fn ($q) => $q->whereKey((int) $data['usuario_id']))
+                ->exists();
+
+            if (! $destinatarioValido) {
+                return response()->json(['message' => 'El destinatario debe ser un usuario de tu dependencia'], 422);
+            }
         }
 
         $notif = Notificacion::create([

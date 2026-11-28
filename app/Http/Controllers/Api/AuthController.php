@@ -7,6 +7,7 @@ use App\Http\Requests\LoginRequest;
 use App\Models\Dependencia;
 use App\Models\Licencia;
 use App\Models\Usuario;
+use App\Rules\NumeroEmpleadoUnico;
 use App\Services\CorreoAutomatizadoService;
 use App\Services\LicenciaService;
 use App\Services\VerificacionCorreoService;
@@ -111,6 +112,7 @@ class AuthController extends Controller
                 'string',
                 'max:50',
                 'regex:/^(?=.*\d)[A-Za-z0-9][A-Za-z0-9._-]{2,49}$/',
+                new NumeroEmpleadoUnico(),
             ],
             'phone' => 'nullable|string|max:30',
             'street' => 'nullable|string|max:150',
@@ -161,19 +163,8 @@ class AuthController extends Controller
             'planType' => 'plan',
         ]);
 
-        // El login identifica al usuario por correo o por ID de empleado a nivel
-        // global, así que el ID debe ser único entre todas las empresas.
+        // La regla NumeroEmpleadoUnico ya validó la unicidad sin distinguir mayúsculas.
         $numeroEmpleado = trim((string) ($data['numeroEmpleado'] ?? ''));
-
-        if ($numeroEmpleado !== '' && Usuario::withTrashed()->whereRaw(
-            'LOWER(numero_empleado) = ?',
-            [mb_strtolower($numeroEmpleado)]
-        )->exists()) {
-            return response()->json([
-                'message' => 'Ese ID de empleado ya está en uso. Elige otro.',
-                'errors' => ['numeroEmpleado' => ['Ese ID de empleado ya está en uso. Elige otro.']],
-            ], 422);
-        }
 
         if (! empty($data['licenciaToken'])) {
             $licencia = $this->licencias->resolverTokenLicencia($data['licenciaToken']);
@@ -185,6 +176,9 @@ class AuthController extends Controller
             }
         } else {
             $licencia = $this->licencias->resolverLicencia((int) ($data['licenciaId'] ?? 1));
+            if ($licencia instanceof Licencia && $licencia->exists && ! $licencia->activo) {
+                $licencia = null;
+            }
         }
 
         if (! $licencia instanceof Licencia) {

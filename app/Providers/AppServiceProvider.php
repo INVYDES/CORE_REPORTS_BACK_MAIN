@@ -86,6 +86,11 @@ class AppServiceProvider extends ServiceProvider
         // Webhooks de pago: 30 por minuto (verificación clave: valor, no IP)
         RateLimiter::for('webhook', fn (Request $request) => Limit::perMinute(30)->by('wh:'.$request->ip()));
 
+        // Portal público de tickets: consulta de empresa y alta de tickets sin sesión.
+        RateLimiter::for('portal-publico', fn (Request $request) => $request->isMethod('post')
+            ? [Limit::perMinute(5)->by('pt:'.$request->ip()), Limit::perDay(50)->by('ptd:'.$request->ip())]
+            : Limit::perMinute(30)->by('pe:'.$request->ip()));
+
         // Escrituras genéricas API: 120 por minuto por usuario/IP
         RateLimiter::for('api-write', function (Request $request) {
             return Limit::perMinute(120)->by($request->user()?->id ?: $request->ip());

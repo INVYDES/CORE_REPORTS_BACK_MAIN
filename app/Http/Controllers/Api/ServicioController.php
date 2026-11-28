@@ -52,6 +52,10 @@ class ServicioController extends Controller
 
     private function generarFolioSecuencial(int $dependenciaId): string
     {
+        // Bloquea la fila de la empresa (dentro de la transacción del alta) para
+        // que dos altas simultáneas no calculen el mismo consecutivo.
+        \App\Models\Dependencia::withoutGlobalScopes()->whereKey($dependenciaId)->lockForUpdate()->first();
+
         $ahora = now('America/Mexico_City');
         $prefijo = 'SRV-'.$ahora->format('ymd');
         $prefijoLegacy = 'SRV-'.$ahora->format('Ymd');
@@ -107,7 +111,7 @@ class ServicioController extends Controller
     public function index(Request $request): JsonResponse
     {
         $user = $request->user() ?? auth()->user();
-        if ($user && isset($user->dependencia_id)) {
+        if ($user && isset($user->dependencia_id) && (int) $request->get('page', 1) <= 1) {
             $this->sincronizarServiciosConReportesFinalizados((int) $user->dependencia_id);
         }
 
@@ -136,7 +140,7 @@ class ServicioController extends Controller
                 ->orWhere('asunto', 'like', "%{$s}%"));
         }
 
-        return response()->json($q->orderBy('fecha_vencimiento')->paginate(min((int) $request->get('per_page', 15), 100)));
+        return response()->json($q->orderBy('fecha_vencimiento')->orderBy('id')->paginate(min(max((int) $request->get('per_page', 15), 1), 100)));
     }
 
     public function store(Request $request): JsonResponse
@@ -148,7 +152,7 @@ class ServicioController extends Controller
         }
 
         $data = $request->validate([
-            'folio' => 'sometimes|nullable|string|max:50',
+            'folio' => ['sometimes', 'nullable', 'string', 'max:50', 'regex:~^[A-Za-z0-9][A-Za-z0-9._/-]*$~'],
             'asunto' => 'required|string|max:200',
             'descripcion' => 'nullable|string',
             'categoria' => 'nullable|in:preventivo,correctivo,instalacion,mejora,diagnostico',

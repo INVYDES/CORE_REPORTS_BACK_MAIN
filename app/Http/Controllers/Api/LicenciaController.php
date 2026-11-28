@@ -83,6 +83,12 @@ class LicenciaController extends Controller
     public function comprarLicenciaMercadoPago(Request $request, int $licenciaId): JsonResponse
     {
         $user = $this->usuario($request);
+
+        // Solo los administradores de la empresa pueden cambiar o comprar el plan.
+        if (! $user->isAdminTec() && ! $user->isAdminCom()) {
+            return response()->json(['success' => false, 'message' => 'No tienes permisos para cambiar el plan de la empresa.'], 403);
+        }
+
         $dependencia = $user->dependencia;
 
         if (! $dependencia instanceof Dependencia) {
@@ -91,7 +97,7 @@ class LicenciaController extends Controller
 
         $licencia = $this->licencias->resolverLicencia($licenciaId);
 
-        if ($licencia === null) {
+        if ($licencia === null || ($licencia->exists && ! $licencia->activo)) {
             return response()->json(['success' => false, 'message' => 'Licencia no encontrada'], 404);
         }
 
@@ -101,6 +107,21 @@ class LicenciaController extends Controller
 
         // Plan gratuito: activación directa, sin pasarela y sin fecha de expiración.
         if ($this->licencias->esPlanGratuito($licencia)) {
+            // No permitir "bajar" a gratis mientras haya un plan de pago vigente:
+            // activarLicencia borraría la fecha de expiración ya pagada.
+            // Durante el mes de prueba de un plan de pago (aún sin pagar) sí se
+            // permite cambiar a gratis.
+            $enPrueba = $dependencia->suscripcion?->estado === 'trial';
+            if (! $enPrueba
+                && $dependencia->tipo_licencia !== 'trial'
+                && $dependencia->fecha_expiracion
+                && $dependencia->fecha_expiracion->copy()->endOfDay()->isFuture()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Tu empresa tiene un plan de pago vigente. Podrás cambiar al plan gratuito cuando venza.',
+                ], 422);
+            }
+
             $this->licencias->activarLicencia($dependencia, $licencia, 'gratis', 0);
 
             return response()->json([

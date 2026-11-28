@@ -25,7 +25,7 @@ class AreaController extends Controller
                 ->orWhere('nombre', 'like', "%{$s}%"));
         }
 
-        return response()->json($q->orderBy('nombre')->paginate(min((int) $request->get('per_page', 15), 100)));
+        return response()->json($q->orderBy('nombre')->paginate(min(max((int) $request->get('per_page', 15), 1), 100)));
     }
 
     public function store(Request $request): JsonResponse

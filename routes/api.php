@@ -53,8 +53,10 @@ Route::prefix('v1')->group(function () {
     Route::get('/licencias/disponibles', [LicenciaController::class, 'disponibles']);
 
     // Portal público de tickets para clientes (autoservicio por empresa)
-    Route::get('/public/empresa/{slug}', [PublicTicketController::class, 'empresa']);
-    Route::post('/public/empresa/{slug}/tickets', [PublicTicketController::class, 'store']);
+    Route::middleware('throttle:portal-publico')->group(function () {
+        Route::get('/public/empresa/{slug}', [PublicTicketController::class, 'empresa']);
+        Route::post('/public/empresa/{slug}/tickets', [PublicTicketController::class, 'store']);
+    });
 
     // Documentos de evidencias: acceso mediante URL firmada temporal.
     Route::get('evidencias/{evidencia}/documento', [EvidenciaController::class, 'documento'])
