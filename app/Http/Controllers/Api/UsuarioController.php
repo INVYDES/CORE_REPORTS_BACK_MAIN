@@ -10,6 +10,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
 
 class UsuarioController extends Controller
@@ -66,7 +67,7 @@ class UsuarioController extends Controller
                 'email' => 'required|email|unique:usuarios,email',
                 'password' => ['required', 'string', 'min:6'],
                 'rol' => 'required|integer|in:0,1,2,3',
-                'numero_empleado' => 'nullable|string|max:50',
+                'numero_empleado' => 'nullable|string|max:50|unique:usuarios,numero_empleado',
             ]);
 
             // Obtener la dependencia de manera segura
@@ -158,7 +159,13 @@ class UsuarioController extends Controller
                 'password' => ['sometimes', 'nullable', 'string', 'min:6'],
                 'rol' => 'sometimes|integer|in:0,1,2,3',
                 'estado' => 'sometimes|boolean',
-                'numero_empleado' => 'sometimes|nullable|string|max:50',
+                'numero_empleado' => [
+                    'sometimes',
+                    'nullable',
+                    'string',
+                    'max:50',
+                    Rule::unique('usuarios', 'numero_empleado')->ignore($usuario->id),
+                ],
             ]);
 
             // No se puede desactivar al último administrador de la dependencia
